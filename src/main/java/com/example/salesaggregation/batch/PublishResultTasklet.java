@@ -36,7 +36,7 @@ public class PublishResultTasklet implements Tasklet {
         AggregationExecutionEntity execution = executions.findById(id).orElseThrow();
         List<RowError> errors = workStore.errors(id);
         if (execution.getValidCount() == 0) {
-            sheets.writeErrorsOnly(id, errors);
+            sheets.writeErrorsOnly(execution.profileSnapshot(), id, errors);
             execution.complete(ExecutionStatus.NO_VALID_DATA, execution.getSourceCount(), 0,
                     execution.getInvalidCount(), "有効な売上データがないため集計結果を更新していません");
             executions.save(execution);
@@ -50,7 +50,7 @@ public class PublishResultTasklet implements Tasklet {
         AggregationResult result = new AggregationResult(id, Instant.now(), execution.getTaxMode(),
                 execution.getTaxRate(), execution.getSettingsVersion(), execution.getSourceCount(),
                 execution.getValidCount(), execution.getInvalidCount(), products, staff, months, grandTotal, errors);
-        sheets.writeResult(result);
+        sheets.writeResult(execution.profileSnapshot(), result);
         ExecutionStatus status = execution.getInvalidCount() == 0
                 ? ExecutionStatus.SUCCESS : ExecutionStatus.SUCCESS_WITH_WARNINGS;
         execution.complete(status, execution.getSourceCount(), execution.getValidCount(),

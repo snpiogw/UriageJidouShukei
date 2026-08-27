@@ -8,16 +8,16 @@ import com.google.auth.http.HttpCredentialsAdapter;
 import com.google.auth.oauth2.GoogleCredentials;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.context.annotation.Lazy;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.util.List;
 
 @Configuration
-@ConditionalOnExpression("'${app.sheets.spreadsheet-id:}' != ''")
 public class GoogleSheetsConfig {
     @Bean
+    @Lazy
     Sheets sheetsClient() throws IOException, GeneralSecurityException {
         GoogleCredentials credentials = GoogleCredentials.getApplicationDefault()
                 .createScoped(List.of(SheetsScopes.SPREADSHEETS));

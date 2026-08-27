@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>設定別実行履歴 | 売上集計</title><link rel="stylesheet" th:href="@{/css/app.css}"></head>
+<body><header class="topbar"><div><p class="eyebrow">History</p><h1 th:text="|${profile.profileName} の実行履歴|">実行履歴</h1></div><a class="button secondary" th:href="@{/admin/profiles}">一覧へ戻る</a></header>
+<main class="container"><section class="summary-grid compact-summary">
+  <article class="card"><p class="card-label">入力シート</p><strong th:text="${profile.sourceSheetName}"></strong></article>
+  <article class="card"><p class="card-label">自動実行</p><strong th:text="${profile.autoEnabled ? #temporals.format(profile.executionTime, 'HH:mm') : 'OFF'}"></strong></article>
+  <article class="card"><p class="card-label">次回実行</p><strong th:text="${profile.nextExecution != null ? #temporals.format(profile.nextExecution, 'yyyy-MM-dd HH:mm') : '予定なし'}"></strong></article>
+</section><section class="panel"><div class="table-wrap"><table><thead><tr><th>受付日時</th><th>起動</th><th>状態</th><th>正常</th><th>除外</th><th></th></tr></thead><tbody>
+  <tr th:each="item : ${history}"><td th:text="${#temporals.format(item.requestedAtLocal, 'yyyy-MM-dd HH:mm:ss')}"></td><td th:text="${item.triggerType.label}"></td><td><span class="status" th:classappend="${item.status}" th:text="${item.status.label}"></span></td><td th:text="${item.validCount}"></td><td th:text="${item.invalidCount}"></td><td><a th:href="@{/admin/executions/{id}(id=${item.id})}">詳細</a></td></tr>
+  <tr th:if="${#lists.isEmpty(history)}"><td colspan="6" class="muted">実行履歴はありません</td></tr>
+</tbody></table></div></section></main></body></html>

@@ -45,7 +45,7 @@ public class AggregationJobListener implements JobExecutionListener {
                 return new FailureDetails(ExecutionStatus.SKIPPED_CONCURRENT, "CONCURRENT_EXECUTION",
                         "別の集計が実行中のため、この実行は開始されませんでした");
             }
-            if (containsMessage(failure, "GOOGLE_SPREADSHEET_ID")) {
+            if (containsMessage(failure, "GOOGLE_SPREADSHEET_ID") || containsMessage(failure, "Spreadsheet ID")) {
                 return failed("SPREADSHEET_NOT_CONFIGURED", "GoogleスプレッドシートIDが設定されていません");
             }
             if (containsMessage(failure, "見出し")) {

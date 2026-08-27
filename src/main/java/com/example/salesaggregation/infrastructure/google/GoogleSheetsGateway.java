@@ -2,13 +2,15 @@ package com.example.salesaggregation.infrastructure.google;
 
 import com.example.salesaggregation.config.AppProperties;
 import com.example.salesaggregation.domain.AggregationResult;
+import com.example.salesaggregation.domain.ExecutionProfileSnapshot;
 import com.example.salesaggregation.domain.RawSalesRow;
 import com.example.salesaggregation.domain.RowError;
 import com.google.api.client.googleapis.json.GoogleJsonResponseException;
 import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.model.*;
 import org.springframework.stereotype.Component;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.BeansException;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -17,62 +19,59 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 @Component
-@ConditionalOnExpression("'${app.sheets.spreadsheet-id:}' != ''")
 public class GoogleSheetsGateway implements SalesSheetGateway {
-    private static final List<String> EXPECTED_HEADERS = List.of("日付", "担当者", "商品名", "数量", "単価");
     private static final int OUTPUT_ROWS_TO_CLEAR = 20_000;
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    private final Sheets sheets;
+    private final ObjectProvider<Sheets> sheetsProvider;
     private final AppProperties properties;
+    private final HeaderMappingResolver headerMappingResolver;
 
-    public GoogleSheetsGateway(Sheets sheets, AppProperties properties) {
-        this.sheets = sheets;
+    public GoogleSheetsGateway(ObjectProvider<Sheets> sheetsProvider, AppProperties properties,
+                               HeaderMappingResolver headerMappingResolver) {
+        this.sheetsProvider = sheetsProvider;
         this.properties = properties;
+        this.headerMappingResolver = headerMappingResolver;
     }
 
     @Override
-    public void validateHeader() throws IOException {
-        requireSpreadsheetId();
-        List<List<Object>> values = executeWithRetry(() -> sheets.spreadsheets().values()
-                .get(properties.sheets().spreadsheetId(), quote(properties.sheets().sourceSheet()) + "!A1:E1")
+    public ResolvedColumnMapping validateHeader(ExecutionProfileSnapshot profile) throws IOException {
+        requireSpreadsheetId(profile);
+        List<List<Object>> values = executeWithRetry(() -> sheets().spreadsheets().values()
+                .get(profile.spreadsheetId(), quote(profile.sourceSheetName()) + "!1:1")
                 .setValueRenderOption("FORMATTED_VALUE")
                 .execute().getValues());
         if (values == null || values.isEmpty()) {
             throw new IOException("売上データの見出しがありません");
         }
-        List<String> actual = new ArrayList<>();
-        for (int i = 0; i < EXPECTED_HEADERS.size(); i++) {
-            actual.add(i < values.getFirst().size() ? values.getFirst().get(i).toString().trim() : "");
-        }
-        if (!actual.equals(EXPECTED_HEADERS)) {
-            throw new IOException("見出しは「日付、担当者、商品名、数量、単価」にしてください");
-        }
+        return headerMappingResolver.resolve(values.getFirst(), profile.columnMapping());
     }
 
     @Override
-    public int sourceRowCount() throws IOException {
-        requireSpreadsheetId();
-        Spreadsheet spreadsheet = executeWithRetry(() -> sheets.spreadsheets()
-                .get(properties.sheets().spreadsheetId())
+    public int sourceRowCount(ExecutionProfileSnapshot profile) throws IOException {
+        requireSpreadsheetId(profile);
+        Spreadsheet spreadsheet = executeWithRetry(() -> sheets().spreadsheets()
+                .get(profile.spreadsheetId())
                 .setFields("sheets.properties(title,gridProperties(rowCount))")
                 .execute());
         return spreadsheet.getSheets().stream()
                 .map(Sheet::getProperties)
-                .filter(sheet -> properties.sheets().sourceSheet().equals(sheet.getTitle()))
+                .filter(sheet -> profile.sourceSheetName().equals(sheet.getTitle()))
                 .map(SheetProperties::getGridProperties)
                 .map(GridProperties::getRowCount)
                 .findFirst()
-                .orElseThrow(() -> new IOException("入力シート「" + properties.sheets().sourceSheet() + "」がありません"));
+                .orElseThrow(() -> new IOException("入力シート「" + profile.sourceSheetName() + "」がありません"));
     }
 
     @Override
-    public List<RawSalesRow> readRows(int startRow, int pageSize) throws IOException {
-        requireSpreadsheetId();
+    public List<RawSalesRow> readRows(ExecutionProfileSnapshot profile, ResolvedColumnMapping mapping,
+                                      int startRow, int pageSize) throws IOException {
+        requireSpreadsheetId(profile);
         int endRow = startRow + pageSize - 1;
-        String range = quote(properties.sheets().sourceSheet()) + "!A" + startRow + ":E" + endRow;
-        List<List<Object>> values = executeWithRetry(() -> sheets.spreadsheets().values().get(
-                        properties.sheets().spreadsheetId(), range)
+        String range = quote(profile.sourceSheetName()) + "!A" + startRow + ":"
+                + columnName(mapping.lastIndex()) + endRow;
+        List<List<Object>> values = executeWithRetry(() -> sheets().spreadsheets().values().get(
+                        profile.spreadsheetId(), range)
                 .setValueRenderOption("UNFORMATTED_VALUE")
                 .setDateTimeRenderOption("SERIAL_NUMBER")
                 .execute().getValues());
@@ -80,44 +79,46 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         List<RawSalesRow> rows = new ArrayList<>(values.size());
         for (int i = 0; i < values.size(); i++) {
             List<Object> row = values.get(i);
-            if (row == null || row.stream().allMatch(v -> v == null || v.toString().isBlank())) continue;
-            rows.add(new RawSalesRow(startRow + i, row));
+            if (row == null) continue;
+            RawSalesRow canonical = mapping.canonicalRow(startRow + i, row);
+            if (canonical.cells().stream().allMatch(v -> v == null || v.toString().isBlank())) continue;
+            rows.add(canonical);
         }
         return rows;
     }
 
     @Override
-    public void writeResult(AggregationResult result) throws IOException {
-        Map<String, Integer> ids = ensureOutputSheets();
-        List<List<Object>> resultRows = resultMatrix(result);
-        List<List<Object>> errorRows = errorMatrix(result.executionId(), result.errors());
+    public void writeResult(ExecutionProfileSnapshot profile, AggregationResult result) throws IOException {
+        Map<String, Integer> ids = ensureOutputSheets(profile);
+        List<List<Object>> resultRows = resultMatrix(profile, result);
+        List<List<Object>> errorRows = errorMatrix(profile, result.executionId(), result.errors());
         List<Request> requests = new ArrayList<>();
-        requests.add(clearRequest(ids.get(properties.sheets().resultSheet()), OUTPUT_ROWS_TO_CLEAR, 11));
-        requests.add(clearRequest(ids.get(properties.sheets().errorSheet()), OUTPUT_ROWS_TO_CLEAR, 6));
-        requests.add(updateRequest(ids.get(properties.sheets().resultSheet()), resultRows));
-        requests.add(updateRequest(ids.get(properties.sheets().errorSheet()), errorRows));
-        batchUpdate(requests);
+        requests.add(clearRequest(ids.get(profile.resultSheetName()), OUTPUT_ROWS_TO_CLEAR, 11));
+        requests.add(clearRequest(ids.get(profile.errorSheetName()), OUTPUT_ROWS_TO_CLEAR, 6));
+        requests.add(updateRequest(ids.get(profile.resultSheetName()), resultRows));
+        requests.add(updateRequest(ids.get(profile.errorSheetName()), errorRows));
+        batchUpdate(profile, requests);
     }
 
     @Override
-    public void writeErrorsOnly(UUID executionId, List<RowError> errors) throws IOException {
-        Map<String, Integer> ids = ensureOutputSheets();
+    public void writeErrorsOnly(ExecutionProfileSnapshot profile, UUID executionId, List<RowError> errors) throws IOException {
+        Map<String, Integer> ids = ensureOutputSheets(profile);
         List<Request> requests = List.of(
-                clearRequest(ids.get(properties.sheets().errorSheet()), OUTPUT_ROWS_TO_CLEAR, 6),
-                updateRequest(ids.get(properties.sheets().errorSheet()), errorMatrix(executionId, errors)));
-        batchUpdate(requests);
+                clearRequest(ids.get(profile.errorSheetName()), OUTPUT_ROWS_TO_CLEAR, 6),
+                updateRequest(ids.get(profile.errorSheetName()), errorMatrix(profile, executionId, errors)));
+        batchUpdate(profile, requests);
     }
 
-    private void batchUpdate(List<Request> requests) throws IOException {
-        executeWithRetry(() -> sheets.spreadsheets().batchUpdate(
-                properties.sheets().spreadsheetId(),
+    private void batchUpdate(ExecutionProfileSnapshot profile, List<Request> requests) throws IOException {
+        executeWithRetry(() -> sheets().spreadsheets().batchUpdate(
+                profile.spreadsheetId(),
                 new BatchUpdateSpreadsheetRequest().setRequests(requests)).execute());
     }
 
-    private Map<String, Integer> ensureOutputSheets() throws IOException {
-        Set<String> required = Set.of(properties.sheets().resultSheet(), properties.sheets().errorSheet());
-        Spreadsheet spreadsheet = executeWithRetry(() -> sheets.spreadsheets()
-                .get(properties.sheets().spreadsheetId())
+    private Map<String, Integer> ensureOutputSheets(ExecutionProfileSnapshot profile) throws IOException {
+        Set<String> required = Set.of(profile.resultSheetName(), profile.errorSheetName());
+        Spreadsheet spreadsheet = executeWithRetry(() -> sheets().spreadsheets()
+                .get(profile.spreadsheetId())
                 .setFields("sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))")
                 .execute());
         Map<String, Integer> ids = sheetIds(spreadsheet);
@@ -129,9 +130,9 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
                                 .setGridProperties(new GridProperties().setRowCount(OUTPUT_ROWS_TO_CLEAR).setColumnCount(12)))))
                 .toList();
         if (!adds.isEmpty()) {
-            batchUpdate(adds);
-            spreadsheet = executeWithRetry(() -> sheets.spreadsheets()
-                    .get(properties.sheets().spreadsheetId())
+            batchUpdate(profile, adds);
+            spreadsheet = executeWithRetry(() -> sheets().spreadsheets()
+                    .get(profile.spreadsheetId())
                     .setFields("sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))")
                     .execute());
             ids = sheetIds(spreadsheet);
@@ -149,7 +150,7 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
                         .setFields("gridProperties(rowCount,columnCount)")));
             }
         }
-        if (!resizes.isEmpty()) batchUpdate(resizes);
+        if (!resizes.isEmpty()) batchUpdate(profile, resizes);
         return ids;
     }
 
@@ -196,10 +197,11 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         return cell.setUserEnteredValue(extended);
     }
 
-    private List<List<Object>> resultMatrix(AggregationResult result) {
+    private List<List<Object>> resultMatrix(ExecutionProfileSnapshot profile, AggregationResult result) {
         List<List<Object>> rows = new ArrayList<>();
         rows.add(List.of("実行ID", result.executionId().toString()));
-        rows.add(List.of("完了日時", DATE_TIME.format(result.completedAt().atZone(ZoneId.of("Asia/Tokyo")))));
+        rows.add(List.of("完了日時", DATE_TIME.format(result.completedAt().atZone(ZoneId.of(profile.timeZone())))));
+        rows.add(List.of("集計設定", profile.profileName()));
         rows.add(List.of("税区分", result.taxMode().label()));
         rows.add(List.of("税率", result.taxRate().toPlainString() + "%"));
         rows.add(List.of("設定バージョン", result.settingsVersion()));
@@ -228,10 +230,10 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         return "売上額（" + result.taxMode().label() + "）";
     }
 
-    private List<List<Object>> errorMatrix(UUID executionId, List<RowError> errors) {
+    private List<List<Object>> errorMatrix(ExecutionProfileSnapshot profile, UUID executionId, List<RowError> errors) {
         List<List<Object>> rows = new ArrayList<>();
         rows.add(List.of("実行ID", "実行日時", "行番号", "項目", "エラーコード", "修正方法"));
-        String now = DATE_TIME.format(java.time.ZonedDateTime.now(ZoneId.of("Asia/Tokyo")));
+        String now = DATE_TIME.format(java.time.ZonedDateTime.now(ZoneId.of(profile.timeZone())));
         for (RowError error : errors) {
             rows.add(List.of(executionId.toString(), now, error.rowNumber(), error.field(), error.code(), error.guidance()));
         }
@@ -242,9 +244,28 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         return "'" + sheetName.replace("'", "''") + "'";
     }
 
-    private void requireSpreadsheetId() {
-        if (properties.sheets().spreadsheetId() == null || properties.sheets().spreadsheetId().isBlank()) {
-            throw new IllegalStateException("GOOGLE_SPREADSHEET_IDが設定されていません");
+    private void requireSpreadsheetId(ExecutionProfileSnapshot profile) {
+        if (profile.spreadsheetId() == null || profile.spreadsheetId().isBlank()) {
+            throw new IllegalStateException("集計設定のSpreadsheet IDが設定されていません");
+        }
+    }
+
+    private String columnName(int zeroBasedIndex) {
+        int value = zeroBasedIndex + 1;
+        StringBuilder name = new StringBuilder();
+        while (value > 0) {
+            value--;
+            name.append((char) ('A' + value % 26));
+            value /= 26;
+        }
+        return name.reverse().toString();
+    }
+
+    private Sheets sheets() throws IOException {
+        try {
+            return sheetsProvider.getObject();
+        } catch (BeansException ex) {
+            throw new IOException("Googleサービスアカウント認証を初期化できません", ex);
         }
     }
 

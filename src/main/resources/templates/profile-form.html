@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${pageTitle + ' | 売上集計'}">集計設定</title><link rel="stylesheet" th:href="@{/css/app.css}"></head>
+<body>
+<header class="topbar"><div><p class="eyebrow">Profile</p><h1 th:text="${pageTitle}">集計設定</h1></div><a class="button secondary" th:href="@{/admin/profiles}">一覧へ戻る</a></header>
+<main class="container narrow">
+  <div class="alert success" th:if="${message}" th:text="${message}"></div><div class="alert error" th:if="${error}" th:text="${error}"></div>
+  <form class="panel stack" th:action="${profileId == null} ? @{/admin/profiles} : @{/admin/profiles/{id}(id=${profileId})}" th:object="${profileForm}" method="post">
+    <input type="hidden" th:field="*{version}">
+    <div class="form-errors" th:if="${#fields.hasAnyErrors()}"><p th:each="err : ${#fields.allErrors()}" th:text="${err}"></p></div>
+    <fieldset><legend>基本情報</legend><div class="form-grid">
+      <label>設定名<input th:field="*{profileName}" maxlength="100" required></label>
+      <label>Spreadsheet ID<input th:field="*{spreadsheetId}" maxlength="255" required></label>
+      <label>入力シート名<input th:field="*{sourceSheetName}" maxlength="100" required></label>
+      <label>集計結果シート名<input th:field="*{resultSheetName}" maxlength="100" required></label>
+      <label>エラーログシート名<input th:field="*{errorSheetName}" maxlength="100" required></label>
+      <label>タイムゾーン<input th:field="*{timeZone}" placeholder="Asia/Tokyo" required></label>
+    </div></fieldset>
+    <fieldset><legend>列マッピング（入力シートの1行目）</legend><div class="form-grid">
+      <label>日付<input th:field="*{dateColumn}" required></label><label>担当者<input th:field="*{staffColumn}" required></label>
+      <label>商品名<input th:field="*{productColumn}" required></label><label>数量<input th:field="*{quantityColumn}" required></label>
+      <label>単価<input th:field="*{unitPriceColumn}" required></label>
+    </div></fieldset>
+    <fieldset><legend>集計・スケジュール</legend><div class="form-grid">
+      <label>税区分<select th:field="*{taxMode}"><option th:each="mode : ${taxModes}" th:value="${mode}" th:text="${mode.label}"></option></select></label>
+      <label>税率（%）<input type="number" step="0.0001" min="0" max="100" th:field="*{taxRate}" required></label>
+      <label>自動実行時刻<input type="time" th:field="*{executionTime}" required></label>
+      <label class="checkbox"><input type="checkbox" th:field="*{autoEnabled}"> 自動実行を有効にする</label>
+    </div></fieldset>
+    <p class="muted">Spreadsheet ID・入力シート・列マッピングを変更した場合は、保存時にGoogle Sheetのヘッダーを確認します。</p>
+    <button type="submit">設定を保存</button>
+  </form>
+</main></body></html>

@@ -8,19 +8,21 @@
   <link rel="stylesheet" th:href="@{/css/app.css}">
 </head>
 <body>
-<header class="topbar"><div><p class="eyebrow">Execution</p><h1>実行詳細</h1></div><a class="button secondary" th:href="@{/admin}">戻る</a></header>
+<header class="topbar"><div><p class="eyebrow">Execution</p><h1>実行詳細</h1></div><a class="button secondary" th:href="@{/admin/profiles/{id}/executions(id=${execution.profileId})}">履歴へ戻る</a></header>
 <main class="container narrow">
   <div class="alert success" th:if="${message}" th:text="${message}"></div>
   <div class="alert error" th:if="${error}" th:text="${error}"></div>
   <section class="panel">
     <div class="execution-title"><span class="status" th:classappend="${execution.status}" th:text="${execution.status.label}"></span><code th:text="${execution.id}"></code></div>
     <div class="detail-grid">
+      <div><small>集計設定</small><strong th:text="${execution.profileName}"></strong></div>
       <div><small>起動方法</small><strong th:text="${execution.triggerType.label}"></strong></div>
       <div><small>税区分</small><strong th:text="${execution.taxMode.label}"></strong></div>
       <div><small>税率</small><strong th:text="|${execution.taxRateDisplay()}%|"></strong></div>
       <div><small>対象行</small><strong th:text="${execution.sourceCount}"></strong></div>
       <div><small>正常行</small><strong th:text="${execution.validCount}"></strong></div>
       <div><small>除外行</small><strong th:text="${execution.invalidCount}"></strong></div>
+      <div><small>タイムゾーン</small><strong th:text="${execution.timeZone}"></strong></div>
     </div>
     <div class="alert" th:if="${execution.summary != null and !execution.hasIssueExplanation()}" th:text="${execution.summary}"></div>
     <p class="muted" th:if="${refresh}">処理中です。この画面は自動更新されます。</p>

@@ -13,29 +13,32 @@ import java.util.UUID;
 
 @Service
 public class AggregationLaunchService {
-    private final SettingsService settingsService;
+    private final AggregationProfileService profileService;
     private final AggregationExecutionRepository executions;
     private final JobLauncher launcher;
     private final Job job;
 
-    public AggregationLaunchService(SettingsService settingsService,
+    public AggregationLaunchService(AggregationProfileService profileService,
                                     AggregationExecutionRepository executions,
                                     @Qualifier("asyncJobLauncher") JobLauncher launcher,
                                     Job salesAggregationJob) {
-        this.settingsService = settingsService;
+        this.profileService = profileService;
         this.executions = executions;
         this.launcher = launcher;
         this.job = salesAggregationJob;
     }
 
-    public UUID launch(TriggerType triggerType) {
-        AggregationSettingsEntity settings = settingsService.current();
+    public UUID launch(long profileId, TriggerType triggerType) {
+        AggregationProfileEntity profile = profileService.get(profileId);
+        if (profile.getSpreadsheetId().isBlank()) {
+            throw new IllegalStateException("Spreadsheet IDが未設定です。集計設定を編集してください");
+        }
         UUID id = UUID.randomUUID();
-        executions.saveAndFlush(new AggregationExecutionEntity(id, triggerType, settings.getTaxMode(),
-                settings.getTaxRate(), settings.getVersion()));
+        executions.saveAndFlush(new AggregationExecutionEntity(id, triggerType, profile.snapshot()));
         try {
             JobParameters params = new JobParametersBuilder()
                     .addString("executionId", id.toString(), true)
+                    .addLong("profileId", profileId, false)
                     .addString("requestedAt", Instant.now().toString(), false)
                     .toJobParameters();
             launcher.run(job, params);
@@ -60,6 +63,7 @@ public class AggregationLaunchService {
         try {
             JobParameters params = new JobParametersBuilder()
                     .addString("executionId", id.toString(), true)
+                    .addLong("profileId", execution.getProfileId(), false)
                     .addString("requestedAt", Instant.now().toString(), false)
                     .toJobParameters();
             launcher.run(job, params);
