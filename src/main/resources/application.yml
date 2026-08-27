@@ -1,0 +1,68 @@
+spring:
+  application:
+    name: sales-aggregation
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/sales_aggregation}
+    username: ${DB_USERNAME:sales_app}
+    password: ${DB_PASSWORD:change-me}
+    hikari:
+      maximum-pool-size: 10
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: never
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+    properties:
+      org.quartz.scheduler.instanceName: salesAggregationScheduler
+      org.quartz.scheduler.instanceId: AUTO
+      org.quartz.jobStore.isClustered: true
+      org.quartz.jobStore.driverDelegateClass: org.quartz.impl.jdbcjobstore.PostgreSQLDelegate
+      org.quartz.jobStore.misfireThreshold: 60000
+      org.quartz.threadPool.threadCount: 2
+  thymeleaf:
+    cache: false
+
+server:
+  error:
+    include-stacktrace: never
+    include-message: never
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: lax
+        secure: ${SESSION_COOKIE_SECURE:false}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+
+app:
+  sheets:
+    spreadsheet-id: ${GOOGLE_SPREADSHEET_ID:}
+    source-sheet: 売上データ
+    result-sheet: 集計結果
+    error-sheet: エラーログ
+    max-rows: ${MAX_SALES_ROWS:10000}
+    fetch-size: ${SHEETS_FETCH_SIZE:500}
+  security:
+    admin-username: ${ADMIN_USERNAME:admin}
+    admin-password-hash: ${ADMIN_PASSWORD_HASH:}
+  batch:
+    chunk-size: ${BATCH_CHUNK_SIZE:500}
+    transient-retry-count: ${BATCH_RETRY_COUNT:3}

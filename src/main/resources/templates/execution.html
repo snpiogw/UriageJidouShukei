@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta th:if="${refresh}" http-equiv="refresh" content="2">
+  <title>実行詳細 | 売上集計</title>
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header class="topbar"><div><p class="eyebrow">Execution</p><h1>実行詳細</h1></div><a class="button secondary" th:href="@{/admin}">戻る</a></header>
+<main class="container narrow">
+  <div class="alert success" th:if="${message}" th:text="${message}"></div>
+  <div class="alert error" th:if="${error}" th:text="${error}"></div>
+  <section class="panel">
+    <div class="execution-title"><span class="status" th:classappend="${execution.status}" th:text="${execution.status.label}"></span><code th:text="${execution.id}"></code></div>
+    <div class="detail-grid">
+      <div><small>起動方法</small><strong th:text="${execution.triggerType.label}"></strong></div>
+      <div><small>税区分</small><strong th:text="${execution.taxMode.label}"></strong></div>
+      <div><small>税率</small><strong th:text="|${execution.taxRateDisplay()}%|"></strong></div>
+      <div><small>対象行</small><strong th:text="${execution.sourceCount}"></strong></div>
+      <div><small>正常行</small><strong th:text="${execution.validCount}"></strong></div>
+      <div><small>除外行</small><strong th:text="${execution.invalidCount}"></strong></div>
+    </div>
+    <div class="alert" th:if="${execution.summary != null and !execution.hasIssueExplanation()}" th:text="${execution.summary}"></div>
+    <p class="muted" th:if="${refresh}">処理中です。この画面は自動更新されます。</p>
+    <form th:if="${execution.restartable()}" th:action="@{/admin/executions/{id}/restart(id=${execution.id})}" method="post">
+      <button type="submit">失敗地点から再開</button>
+    </form>
+  </section>
+  <section class="panel issue-panel" th:if="${execution.hasIssueExplanation()}">
+    <p class="eyebrow">原因と対処方法</p>
+    <h2 th:text="${execution.issueTitle()}">処理結果を確認してください</h2>
+    <dl class="issue-details">
+      <div th:if="${execution.summary}"><dt>原因</dt><dd th:text="${execution.summary}"></dd></div>
+      <div><dt>対処方法</dt><dd th:text="${execution.issueGuidance()}"></dd></div>
+      <div th:if="${execution.errorCode}"><dt>エラーコード</dt><dd><code th:text="${execution.errorCode}"></code></dd></div>
+    </dl>
+  </section>
+  <section class="panel" th:if="${!#lists.isEmpty(errors)}">
+    <h2>除外された入力行</h2>
+    <div class="table-wrap"><table><thead><tr><th>行</th><th>項目</th><th>コード</th><th>修正方法</th></tr></thead>
+      <tbody><tr th:each="error : ${errors}"><td th:text="${error.rowNumber}"></td><td th:text="${error.field}"></td><td th:text="${error.code}"></td><td th:text="${error.guidance}"></td></tr></tbody>
+    </table></div>
+  </section>
+</main>
+</body>
+</html>

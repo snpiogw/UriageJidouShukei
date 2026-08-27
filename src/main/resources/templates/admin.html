@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="ja" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>売上集計ダッシュボード</title>
+  <link rel="stylesheet" th:href="@{/css/app.css}">
+</head>
+<body>
+<header class="topbar">
+  <div><p class="eyebrow">Sales Aggregation</p><h1>売上集計ダッシュボード</h1></div>
+  <form th:action="@{/logout}" method="post"><button class="secondary" type="submit">ログアウト</button></form>
+</header>
+<main class="container">
+  <div class="alert success" th:if="${message}" th:text="${message}"></div>
+  <div class="alert error" th:if="${error}" th:text="${error}"></div>
+
+  <section class="summary-grid">
+    <article class="card">
+      <p class="card-label">最新試行</p>
+      <div th:if="${latestAttempt != null}">
+        <strong th:text="${latestAttempt.status.label}">状態</strong>
+        <p th:text="${#temporals.format(latestAttempt.requestedAtJst, 'yyyy-MM-dd HH:mm:ss')}"></p>
+        <small th:text="|正常 ${latestAttempt.validCount}件 / 除外 ${latestAttempt.invalidCount}件|"></small>
+      </div>
+      <p class="muted" th:unless="${latestAttempt != null}">実行履歴はありません</p>
+    </article>
+    <article class="card">
+      <p class="card-label">最新成功</p>
+      <div th:if="${latestSuccess != null}">
+        <strong th:text="${latestSuccess.status.label}">成功</strong>
+        <p th:text="${#temporals.format(latestSuccess.completedAtJst, 'yyyy-MM-dd HH:mm:ss')}"></p>
+        <a th:href="@{/admin/executions/{id}(id=${latestSuccess.id})}">詳細を見る</a>
+      </div>
+      <p class="muted" th:unless="${latestSuccess != null}">成功結果はありません</p>
+    </article>
+    <article class="card">
+      <p class="card-label">次回自動実行</p>
+      <strong th:if="${nextExecution != null}" th:text="${#temporals.format(nextExecution, 'yyyy-MM-dd HH:mm')}"></strong>
+      <strong th:unless="${nextExecution != null}">無効</strong>
+      <p class="muted">Asia/Tokyo</p>
+    </article>
+  </section>
+
+  <section class="two-column">
+    <article class="panel">
+      <div class="panel-header"><div><p class="eyebrow">Manual run</p><h2>手動集計</h2></div></div>
+      <p>保存済みの税設定を使用し、バックグラウンドで集計を開始します。</p>
+      <form th:action="@{/admin/executions}" method="post">
+        <button type="submit">集計を実行</button>
+      </form>
+    </article>
+
+    <article class="panel">
+      <div class="panel-header"><div><p class="eyebrow">Settings</p><h2>集計設定</h2></div></div>
+      <form th:action="@{/admin/settings}" th:object="${settingsForm}" method="post" class="form-grid">
+        <input type="hidden" th:field="*{version}">
+        <label>税区分
+          <select th:field="*{taxMode}">
+            <option th:each="mode : ${taxModes}" th:value="${mode}" th:text="${mode.label}"></option>
+          </select>
+        </label>
+        <label>税率（%）<input type="number" step="0.0001" min="0" max="100" th:field="*{taxRate}" required></label>
+        <label>自動実行時刻<input type="time" th:field="*{executionTime}" required></label>
+        <label class="checkbox"><input type="checkbox" th:field="*{autoEnabled}"> 自動実行を有効にする</label>
+        <p class="field-error" th:if="${#fields.hasAnyErrors()}" th:errors="*{all}"></p>
+        <button type="submit">設定を保存</button>
+      </form>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="panel-header"><div><p class="eyebrow">History</p><h2>実行履歴</h2></div></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>受付日時</th><th>起動</th><th>状態</th><th>正常</th><th>除外</th><th></th></tr></thead>
+        <tbody>
+          <tr th:each="item : ${history}">
+            <td th:text="${#temporals.format(item.requestedAtJst, 'yyyy-MM-dd HH:mm:ss')}"></td>
+            <td th:text="${item.triggerType.label}"></td>
+            <td><span class="status" th:classappend="${item.status}" th:text="${item.status.label}"></span></td>
+            <td th:text="${item.validCount}"></td><td th:text="${item.invalidCount}"></td>
+            <td><a th:href="@{/admin/executions/{id}(id=${item.id})}">詳細</a></td>
+          </tr>
+          <tr th:if="${#lists.isEmpty(history)}"><td colspan="6" class="muted">実行履歴はありません</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+</body>
+</html>

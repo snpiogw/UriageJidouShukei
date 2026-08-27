@@ -1,0 +1,13 @@
+target/
+.idea/
+.vscode/
+.settings/
+.classpath
+.project
+*.iml
+.DS_Store
+.env
+credentials*.json
+secrets/
+*.log
+work/
