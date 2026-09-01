@@ -20,6 +20,26 @@
 - Google API接続・読込タイムアウト、実行履歴の保持期限、再開試行ごとの監査履歴
 - Flyway、PostgreSQL、Quartz JDBC JobStore、Docker Compose
 
+## 画面イメージ
+
+### 集計設定一覧
+
+![集計設定一覧](docs/images/dashboard.jpg)
+
+Spreadsheetごとの稼働状態、次回実行、最終結果を一覧で確認し、手動集計や履歴確認へ移動できます。
+
+### 集計設定の編集
+
+![集計設定の編集](docs/images/profile-form.jpg)
+
+タブ名、列マッピング、税設定、タイムゾーン、手動・自動実行の有効状態をProfile単位で管理します。
+
+### 入力エラーを含む実行結果
+
+![一部除外ありの実行詳細](docs/images/execution-warning.jpg)
+
+不正行だけを除外し、対象行、原因、修正方法、実行試行の処理時間を管理画面へ表示します。
+
 ## 構成図
 
 ```mermaid
