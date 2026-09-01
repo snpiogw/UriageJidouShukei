@@ -2,6 +2,8 @@ package com.example.salesaggregation.batch;
 
 import com.example.salesaggregation.config.AppProperties;
 import com.example.salesaggregation.domain.RawSalesRow;
+import com.example.salesaggregation.domain.ExecutionProfileSnapshot;
+import com.example.salesaggregation.infrastructure.google.ResolvedColumnMapping;
 import com.example.salesaggregation.infrastructure.google.SalesSheetGateway;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemStreamException;
@@ -15,6 +17,7 @@ import java.util.List;
 public class GoogleSalesItemReader extends AbstractItemStreamItemReader<RawSalesRow> {
     private static final String CHECKPOINT_ROW_KEY = "googleSheets.checkpointRow";
     private final SalesSheetGateway gateway;
+    private final ExecutionProfileSnapshot profile;
     private final int fetchSize;
     private final int maxRows;
     private final Deque<RawSalesRow> buffer = new ArrayDeque<>();
@@ -22,9 +25,12 @@ public class GoogleSalesItemReader extends AbstractItemStreamItemReader<RawSales
     private int checkpointRow = 2;
     private int sourceRowCount = -1;
     private boolean finished;
+    private ResolvedColumnMapping mapping;
 
-    public GoogleSalesItemReader(SalesSheetGateway gateway, AppProperties properties) {
+    public GoogleSalesItemReader(SalesSheetGateway gateway, AppProperties properties,
+                                 ExecutionProfileSnapshot profile) {
         this.gateway = gateway;
+        this.profile = profile;
         this.fetchSize = properties.sheets().fetchSize();
         this.maxRows = properties.sheets().maxRows();
         setName("googleSalesItemReader");
@@ -39,14 +45,14 @@ public class GoogleSalesItemReader extends AbstractItemStreamItemReader<RawSales
     }
 
     private void loadNextPage() throws IOException {
-        if (sourceRowCount < 0) sourceRowCount = gateway.sourceRowCount();
+        if (sourceRowCount < 0) sourceRowCount = gateway.sourceRowCount(profile);
         if (nextPageStart > sourceRowCount) {
             finished = true;
             return;
         }
         if (nextPageStart > maxRows + 1) {
             int size = Math.min(fetchSize, sourceRowCount - nextPageStart + 1);
-            List<RawSalesRow> overflow = gateway.readRows(nextPageStart, size);
+            List<RawSalesRow> overflow = gateway.readRows(profile, mapping, nextPageStart, size);
             if (!overflow.isEmpty()) {
                 throw new IllegalStateException("入力データが最大行数" + maxRows + "件を超えています");
             }
@@ -55,7 +61,7 @@ public class GoogleSalesItemReader extends AbstractItemStreamItemReader<RawSales
         }
         int size = Math.min(fetchSize, Math.min(maxRows + 2 - nextPageStart,
                 sourceRowCount - nextPageStart + 1));
-        List<RawSalesRow> rows = gateway.readRows(nextPageStart, size);
+        List<RawSalesRow> rows = gateway.readRows(profile, mapping, nextPageStart, size);
         nextPageStart += size;
         // An empty page does not prove end-of-data: users may leave a large blank area in the sheet.
         // Continue up to the configured maximum so later rows are not silently skipped.
@@ -69,6 +75,11 @@ public class GoogleSalesItemReader extends AbstractItemStreamItemReader<RawSales
         buffer.clear();
         sourceRowCount = -1;
         finished = false;
+        try {
+            mapping = gateway.validateHeader(profile);
+        } catch (IOException ex) {
+            throw new ItemStreamException("Google Sheetのヘッダーを確認できません", ex);
+        }
     }
 
     @Override

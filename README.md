@@ -1,230 +1,245 @@
-# 売上自動集計システム
+# 汎用売上自動集計システム
 
-Googleスプレッドシートに入力された売上データを、商品・担当者・月ごとに自動集計するSpring Bootアプリケーションです。管理画面からの手動実行と、毎日21:00（Asia/Tokyo）の自動実行に対応しています。
+[![CI](https://github.com/snpiogw/UriageJidouShukei/actions/workflows/ci.yml/badge.svg)](https://github.com/snpiogw/UriageJidouShukei/actions/workflows/ci.yml)
 
-副業案件で求められやすい「外部API連携」「バッチ処理」「DBを使った履歴管理」「運用画面」「エラー処理」を、一つの小規模な業務システムとして実装しています。
-
-## 何ができるシステムなのか
-
-スプレッドシートで管理している日々の売上を、手作業で集計・転記する業務を自動化します。管理者は画面から税区分や実行時刻を設定し、必要なときは手動で集計できます。処理後は商品・担当者・月ごとの集計結果がGoogle Sheetsへ出力され、実行結果とエラー内容は管理画面に残ります。
-
-| 利用場面 | できること |
-|---|---|
-| 日次の定型業務 | 指定時刻に自動実行し、売上を商品別・担当者別・月別に集計 |
-| 急ぎの再集計 | 管理画面から手動実行 |
-| 入力ミスの確認 | 不正な行だけを除外し、行番号・原因・修正方法を表示 |
-| 障害対応 | 失敗理由と対処方法を確認し、失敗地点から処理を再開 |
-| 運用確認 | 実行履歴、処理件数、次回自動実行日時をダッシュボードで確認 |
+複数のGoogleスプレッドシートに入力された売上データを、商品・担当者・月ごとに集計するSpring Bootアプリケーションです。小規模事業者や店舗ごとに集計設定（Aggregation Profile）を登録し、異なるシート名、列名、税設定、実行時刻を管理できます。
 
 ## 主な機能
 
-- Google Sheetsから最大10,000件の売上データを取得
-- 商品別、担当者別、月別、総売上を別シートへ出力
-- 税抜・税込を管理画面から選択（税率変更可、初期値10%）
-- 税込計算は行単位で1円未満を切り捨て
-- 管理画面から非同期で手動実行
-- Quartz JDBC JobStoreによる毎日21:00の永続スケジュール
-- Spring Batchによる500件単位のチャンク処理、チェックポイント、失敗地点からの再開
-- PostgreSQLによる設定、実行履歴、途中集計、エラーの保存
-- 不正行を除外し、行番号・項目・修正方法を表示
-- PostgreSQL advisory lockによる二重実行防止
-- 管理者ログイン、BCrypt、CSRF、CSP、HttpOnly/SameSite Cookie
-- Flyway、Docker Compose、GitHub Actions
+- 複数のGoogleスプレッドシートをProfile単位で管理
+- 日付・担当者・商品名・数量・単価のヘッダー名を設定可能
+- 列順変更と関係のない追加列に対応
+- Profileごとの手動実行、状態フィルター・ページング付き実行履歴、次回実行時刻
+- Profileの無効化、最終実行結果、Googleスプレッドシートへの直接リンク
+- ProfileごとのQuartz永続スケジュール
+- Spring Batchによるチャンク処理、チェックポイント、失敗地点からの再開
+- Profile単位のPostgreSQL advisory lock（別Profileは同時実行可能）
+- 不正行の除外、エラーログ出力、最大10,000件の入力
+- 税抜・税込、税率0〜100%、行単位の端数処理
+- Spring Security、BCrypt、CSRF、CSP、HttpOnly/SameSite Cookie
+- Google API接続・読込タイムアウト、実行履歴の保持期限、再開試行ごとの監査履歴
+- Flyway、PostgreSQL、Quartz JDBC JobStore、Docker Compose
+
+## 画面イメージ
+
+### 集計設定一覧
+
+![集計設定一覧](docs/images/dashboard.jpg)
+
+Spreadsheetごとの稼働状態、次回実行、最終結果を一覧で確認し、手動集計や履歴確認へ移動できます。
+
+### 集計設定の編集
+
+![集計設定の編集](docs/images/profile-form.jpg)
+
+タブ名、列マッピング、税設定、タイムゾーン、手動・自動実行の有効状態をProfile単位で管理します。
+
+### 入力エラーを含む実行結果
+
+![一部除外ありの実行詳細](docs/images/execution-warning.jpg)
+
+不正行だけを除外し、対象行、原因、修正方法、実行試行の処理時間を管理画面へ表示します。
 
 ## 構成図
 
 ```mermaid
 flowchart LR
-    User[管理者] --> Controller[Controller層]
-    Controller --> App[Service層]
-    App --> Batch[Spring Batch]
-    App --> Quartz[Quartz]
-    App --> Repo[Repository層]
-    Quartz --> Batch
+    Admin[管理者] --> Web[管理画面]
+    Web --> Profile[Aggregation Profile Service]
+    Profile --> DB[(PostgreSQL)]
+    Profile --> Quartz[Profile別 Quartz Job / Trigger]
+    Web --> Launch[Launch Service]
+    Quartz --> Launch
+    Launch -->|executionId + non-identifying profileId| Batch[Spring Batch]
+    Batch --> Lock[Profile別 advisory lock]
     Batch --> Sheets[Google Sheets API]
-    Batch --> Repo
-    Repo --> DB[(PostgreSQL)]
+    Batch --> Work[途中集計・エラー・履歴]
+    Lock --> DB
+    Work --> DB
 ```
 
-依存方向を明確にするため、Web層はRepositoryやJPAエンティティを直接参照しません。Service層がユースケースを組み立て、画面には読み取り専用DTOを返します。
+Web層はJPA Entityを直接操作せず、Application Serviceと読み取り専用ViewModelを介します。集計開始時のProfile設定は実行履歴へスナップショット保存されるため、実行中や失敗後にProfileが編集されても、再開対象の入力元・列マッピング・出力先は変わりません。
 
-| パッケージ | 役割 |
+## Aggregation Profile
+
+各Profileは次の設定を持ちます。
+
+| 分類 | 設定 |
 |---|---|
-| `web` | HTTP受付、入力値検証、画面遷移 |
-| `application` | 手動実行、設定変更、照会などのユースケース |
-| `domain` | 売上行の検証、税計算、集計用モデル |
-| `batch` | 読取・検証・チャンク集計・結果公開 |
-| `quartz` | DB永続型の定時起動 |
-| `infrastructure.google` | Google Sheets APIアダプター |
-| `infrastructure.persistence` | JPA/JDBC Repositoryと排他制御 |
+| 基本 | 設定名、Spreadsheet ID |
+| シート | 入力、集計結果、エラーログのシート名 |
+| 列 | 日付、担当者、商品名、数量、単価のヘッダー名 |
+| 集計 | 税区分、税率 |
+| スケジュール | 自動実行ON/OFF、実行時刻、タイムゾーン |
+| 管理 | 有効/無効、version、作成日時、更新日時、更新者 |
 
-## 画面キャプチャ
-
-### ダッシュボード
-
-自動・手動の実行履歴、最新結果、次回実行日時、税設定を一画面で確認できます。画面上の実行方法と状態は日本語で表示します。
-
-![売上集計ダッシュボード](docs/images/dashboard.jpg)
-
-### 一部除外ありの実行詳細
-
-除外理由、対象行、修正方法を表示します。税率は不要な末尾ゼロを省略して表示します。
-
-![一部除外ありの実行詳細](docs/images/execution-warning.jpg)
-
-### 失敗時の実行詳細
-
-失敗の概要、対処方法、問い合わせやログ検索に使えるエラーコードをまとめて表示します。
-
-![失敗時の実行詳細](docs/images/execution-failure.jpg)
-
-## バッチ処理の流れ
-
-```mermaid
-sequenceDiagram
-    participant Q as Web / Quartz
-    participant L as Launch Service
-    participant B as Spring Batch
-    participant G as Google Sheets
-    participant P as PostgreSQL
-
-    Q->>L: 集計を要求
-    L->>P: 実行履歴をQUEUEDで保存
-    L-->>Q: 実行IDを即時返却
-    L->>B: 非同期起動
-    B->>P: advisory lock取得
-    B->>G: ヘッダー検証・ページ読取
-    loop 500件ごと
-        B->>B: 入力検証・税計算
-        B->>P: 途中集計とチェックポイントをコミット
-    end
-    B->>G: 集計結果とエラーログを一括更新
-    B->>P: 最終状態を保存してロック解除
-```
-
-`@Scheduled`は使用していません。スケジュールと実行状態をPostgreSQLへ保存できるQuartzを採用し、集計本体はSpring Batchへ分離しています。現状は安全性と実装コストを優先した逐次チャンク処理で、件数増加時はpartition stepへ拡張できます。
-
-## 入力シート
-
-シート名は `売上データ`、A1:E1の見出しは次の順序で固定です。
+初期Profileの列マッピングは従来と同じです。
 
 | 日付 | 担当者 | 商品名 | 数量 | 単価 |
 |---|---|---|---:|---:|
 | 2026-08-01 | 田中 | 商品A | 2 | 1200 |
 
-- 日付：Google Sheetsの日付セル、または `yyyy-MM-dd`
-- 担当者・商品名：必須、100文字以内
-- 数量：0以上1,000,000,000以下の整数
-- 単価：0円以上1,000,000,000,000円以下の整数
-- 完全な空白行は件数に含めません
+ヘッダーは入力シートの1行目から検索します。前後空白を除いて設定値と一致する列を使用するため、次のような順序でも集計できます。
 
-読み込み用データは [docs/sample-sales.csv](docs/sample-sales.csv) にあります。
+| メモ | 商品 | 価格 | 販売日 | 個数 | 担当 |
+|---|---|---:|---|---:|---|
 
-## 出力
+この場合は `販売日 / 担当 / 商品 / 個数 / 価格` を列マッピングへ指定します。対象列の欠落や重複はエラーです。ヘッダー行自体は1行目固定です。
 
-- `集計結果`：実行条件、処理件数、商品別・担当者別・月別・総売上
-- `エラーログ`：実行ID、実行日時、元シートの行番号、項目、エラーコード、修正方法
+## 利用例
 
-有効な行が1件もない場合は、正常だった前回の集計結果を保持し、エラーログだけを更新します。
+| 設定名 | Spreadsheet | 入力シート | 自動実行 |
+|---|---|---|---|
+| 店舗A | sheet-a | 売上 | 21:00 Asia/Tokyo |
+| 店舗B | sheet-b | Sales | 22:30 Asia/Tokyo |
+| 催事集計 | sheet-a | 催事売上 | OFF |
+
+同じSpreadsheet IDでも入力シートが異なれば登録できます。ただし誤上書きを防ぐため、同一Spreadsheet内の入力・集計結果・エラーログの各シートは、別Profileと共有できません。設定名、および `Spreadsheet ID + 入力シート名` も重複できません。
+
+## Batchと再開
+
+```mermaid
+sequenceDiagram
+    participant W as Web / Quartz
+    participant L as Launch Service
+    participant B as Spring Batch
+    participant G as Google Sheets
+    participant P as PostgreSQL
+    W->>L: profileIdで実行要求
+    L->>P: Profileスナップショットと実行履歴を保存
+    L->>B: executionId/profileIdで非同期起動
+    B->>P: Profile単位advisory lock
+    B->>G: ヘッダー解決・ページ読取
+    loop チャンクごと
+        B->>P: 途中集計とチェックポイントをコミット
+    end
+    B->>G: 結果とエラーログを公開
+    B->>P: 最終状態を保存してロック解除
+```
+
+Spring Batchのidentifying JobParameterは `executionId` だけです。`profileId` と `requestedAt` はnon-identifyingであり、V3以前に作成されたJobInstanceも同じ `executionId` で再開できます。Batch内部は原則として `executionId` から実行スナップショットを取得します。V5以降は、再開のたびに試行番号、状態、処理時間、エラーコードを別履歴として保持するため、再開成功後も最初の失敗原因を確認できます。
+
+同じProfileの多重実行は防止しますが、Profile AとProfile BはBatch executorの範囲内で同時実行できます。途中集計テーブルと行エラーはexecution ID単位です。結果公開後は途中集計だけを削除し、入力エラーと実行履歴は保持します。
+
+## Quartzスケジュール
+
+Profileごとに独立したJobDetailとCronTriggerをQuartz JDBC JobStoreへ保存します。設定変更時は対象ProfileのTriggerだけを更新し、自動実行OFFではそのTriggerだけを解除します。
+
+アプリ起動時にはDBの全Profileと永続Triggerを照合します。旧バージョンの単一TriggerはV4移行後に削除され、初期Profile用のTriggerへ置き換わります。Spreadsheet IDが未設定のProfileにはTriggerを作成しません。
+
+## DB構成
+
+Flyway V4で、既存データを保持したまま次の変更を行います。
+
+- `aggregation_settings` を `aggregation_profile` へ移行
+- ID=1を「既存設定」Profileとして保持
+- Spreadsheet、シート、列マッピング、作成日時を追加
+- 新規Profile用のIDシーケンスを追加
+- `aggregation_execution.profile_id` を追加
+- 実行時のSpreadsheet、シート、列、タイムゾーンを履歴へスナップショット保存
+- Profile別履歴用インデックスと重複制約を追加
+
+V1/V2/V3は変更しません。Spring Batchメタデータ、Quartzメタデータ、途中集計、エラーの既存テーブルも維持します。
+
+Flyway V5ではProfileの有効/無効と、再開試行の監査テーブルを追加します。既存実行には現在の最終状態を試行1として補完します。V6では既存の完了済み実行に残っていた途中集計だけを削除し、保持期限削除用のインデックスを追加します。完了済み実行は既定180日後に関連データごと削除され、保持日数は環境変数で変更できます。
+
+## V3以前からの移行
+
+1. DBをバックアップします。
+2. V4を含むアプリケーションを起動します。
+3. Flywayが既存のID=1設定を初期Profileへ移行します。
+4. 初期ProfileのSpreadsheet IDが空の場合だけ、`GOOGLE_SPREADSHEET_ID` から一度だけ補完します。
+5. 同時に、V4以前の実行履歴で不足しているスナップショットを初期Profileから補完します。
+6. 管理画面で初期Profileと次回実行予定を確認します。
+
+一度DBへ補完されたSpreadsheet IDは、後の起動で環境変数から上書きされません。既存実行スナップショットも空の場合だけ補完し、Profile編集によって過去履歴を書き換えません。
+
+`GOOGLE_SPREADSHEET_ID` とDBの両方が空でもアプリは起動します。管理画面では「要設定」と表示され、手動・自動実行は設定完了まで行われません。新規Profileは常にDBで管理します。
 
 ## 起動方法
 
 ### 必要なもの
 
+- Java 21（ローカル実行時）
 - Docker Desktop
-- Google CloudのサービスアカウントJSON
-- サービスアカウントへ編集権限を付与したGoogleスプレッドシート
-
-### 1. 環境変数を用意
+- Google Sheets APIを有効にしたGoogle Cloudプロジェクト
+- 編集権限を持つサービスアカウントJSON
 
 ```bash
 cp .env.example .env
 mkdir -p secrets
 ```
 
-サービスアカウントJSONを `secrets/google-service-account.json` に配置します。Google Cloud側ではGoogle Sheets APIを有効化し、JSON内のサービスアカウントメールアドレスを対象スプレッドシートの編集者として共有してください。
-
-`.env` の次の値を変更します。
-
-```dotenv
-POSTGRES_PASSWORD=十分に長いDBパスワード
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH='生成したBCryptハッシュ'
-GOOGLE_SPREADSHEET_ID=スプレッドシートURL内のID
-```
-
-HTTPSで公開する本番環境では `SESSION_COOKIE_SECURE=true` にしてください。
-`ADMIN_PASSWORD_HASH` が空の場合は、安全のためアプリケーションが起動に失敗します。
-
-BCryptハッシュの生成例です。
+`secrets/google-service-account.json` を配置し、対象スプレッドシートをサービスアカウントへ共有します。管理パスワードはBCryptで設定してください。
 
 ```bash
 docker run --rm httpd:2.4-alpine htpasswd -bnBC 12 "" "任意の管理者パスワード" | tr -d ':\n'
-```
-
-### 2. 起動
-
-```bash
 docker compose --profile app up --build
 ```
 
-[http://localhost:8080](http://localhost:8080) を開き、設定した管理者情報でログインします。
+[http://localhost:8080](http://localhost:8080) へログインし、「新規登録」または初期Profileの「編集」からSpreadsheet IDを設定します。
 
-ローカルの5432番ポートが使用中の場合は、`.env` の `POSTGRES_PORT` と `DB_URL` のポートを同じ空き番号へ変更できます。コンテナ版アプリからDBへの接続には影響しません。
+HTTPS環境では `SESSION_COOKIE_SECURE=true` にしてください。`ADMIN_PASSWORD_HASH` が空の場合、アプリは安全のため起動しません。
 
-### 3. 開発時のテスト
+### 運用設定
+
+| 環境変数 | 既定値 | 用途 |
+|---|---:|---|
+| `SHEETS_CONNECT_TIMEOUT_MILLIS` | `5000` | Google APIへの接続待ち上限 |
+| `SHEETS_READ_TIMEOUT_MILLIS` | `30000` | Google API応答待ち上限 |
+| `EXECUTION_HISTORY_DAYS` | `180` | 完了済み実行履歴の保持日数 |
+| `EXECUTION_CLEANUP_CRON` | `0 15 3 * * *` | 履歴削除時刻（Asia/Tokyo） |
+
+バックアップ、復元、監視、障害時の確認順は [運用手順](docs/operations.md)、提出時の説明順は [2分デモ手順](docs/portfolio-demo.md) を参照してください。
+
+### 既存環境用Spreadsheet ID
+
+```dotenv
+# V3以前からの移行時だけ使用。新規環境では空で構いません。
+GOOGLE_SPREADSHEET_ID=
+```
+
+## 入力検証
+
+- 日付: Google Sheetsの日付セル、または `yyyy-MM-dd`
+- 担当者・商品名: 必須、100文字以内
+- 数量: 0以上1,000,000,000以下の整数
+- 単価: 0円以上1,000,000,000,000円以下の整数
+- Profile税率: 0〜100、小数4桁以内
+- Profileタイムゾーン: Java `ZoneId` として有効な値
+- シート名: 必須、100文字以内、Google Sheetsで使用できない文字を禁止
+
+完全な空白行と、列マッピング対象がすべて空の行は件数に含めません。不正行は除外し、行番号、項目、エラーコード、修正方法を保存・出力します。有効行が0件の場合、前回の集計結果は保持し、エラーログだけを更新します。
+
+## セキュリティと秘密情報
+
+- 管理者認証はBCryptハッシュを使用
+- POST操作はSpring SecurityのCSRF保護対象
+- CSPとframe denyを設定
+- Session CookieはHttpOnly/SameSite=Lax
+- `.env`、`credentials*.json`、`secrets/` は `.gitignore` と `.dockerignore` の対象
+- 画面やGoogle Sheetへスタックトレースや秘密情報を出力しない
+
+サービスアカウントJSONや実パスワードをGitへ追加しないでください。
+
+## テスト
 
 ```bash
 ./mvnw verify
 ```
 
-Dockerが使用可能な環境では、TestcontainersによるPostgreSQL 17の結合テストも実行されます。Dockerがない環境ではDB結合テストだけがスキップされます。
+単体テストでは、既存の税計算・入力検証・再開処理に加え、列順変更、Profile重複、出力衝突、Legacy補完、JobParameter互換、Profile別Quartz、Profile別ロック、無効Profileの起動拒否を確認します。Dockerが利用できる環境ではTestcontainersによりPostgreSQL 17へV1〜V6を適用し、既存履歴の試行履歴への移行、JPA、Quartz JDBCスキーマも検証します。
 
-## 状態とエラー方針
-
-| 内部状態 | 画面表示 | 意味 |
-|---|---|---|
-| `QUEUED` | 受付済み | 非同期実行の受付済み |
-| `RUNNING` | 実行中 | 集計中 |
-| `SUCCESS` | 成功 | 全行を正常に集計 |
-| `SUCCESS_WITH_WARNINGS` | 一部除外ありで成功 | 不正行を除外して集計 |
-| `NO_VALID_DATA` | 有効データなし | 有効行がなく、集計結果は未更新 |
-| `SKIPPED_CONCURRENT` | 他の処理を実行中 | 別の集計が実行中 |
-| `FAILED` | 失敗 | 起動、入力、DB、Google APIなどで失敗 |
-| `UNKNOWN` | 状態不明 | 外部APIの結果を確定できない場合に使用する予約状態 |
-
-Google APIの429と5xx、通信エラーは指数バックオフ付きで既定3回再試行します。画面やスプレッドシートには秘密情報や内部スタックトレースを出さず、追跡には実行IDを使います。
-
-`FAILED` の実行詳細には「失敗地点から再開」ボタンが表示されます。同じSpring Batch JobInstanceを再利用するため、完了済みチャンクは再集計せず、失敗したステップから処理を続行します。再開時も排他ロックを再取得します。
-
-## テストと確認範囲
-
-- 税抜・税込、端数切り捨て
-- 必須項目、日付、整数、上限値の検証
-- 正常行・異常行のバッチ処理
-- チェックポイント再開時の二重加算防止
-- 空白区間後の行の読み取り
-- PostgreSQLへのFlyway適用と21:00の保持
-- Springコンテキスト、JPA、Quartz JDBCスキーマの起動
-
-実Google Sheetsを使う確認項目は [docs/acceptance-test.md](docs/acceptance-test.md) にまとめています。
-
-## 設計上の判断
-
-- **21:00を初期値に採用**：当日の入力が概ね終わった後に日次集計する業務フローを想定。管理画面から変更可能です。
-- **PostgreSQLを作業領域にも使用**：全件をメモリへ保持せず、チャンクごとにコミットできます。
-- **出力は最後に一括反映**：途中結果が利用者から完成結果に見えることを防ぎます。
-- **設定を実行履歴へスナップショット**：実行中に税設定が変わっても、計算条件を後から説明できます。
-- **楽観ロックと排他ロックを分離**：設定更新競合とバッチ多重起動を、それぞれ適切な方法で防止します。
+実Google Sheetsを使う確認項目は `docs/acceptance-test.md` にあります。
 
 ## 残存する制約
 
-- Google Sheets APIの実サービス確認には、利用者自身のGoogle Cloud認証情報が必要です。
-- 出力直前にネットワーク断が起きた場合、Google側の反映有無を完全には判定できません。出力は同じ実行結果で上書き可能な形にしています。
-- エラー詳細のDB保存は最大500件です。正常・異常件数は上限を超えても集計します。
-- 管理者は単一ユーザー構成です。複数顧客・権限別運用ではユーザーテーブルと監査ログの拡張が必要です。
-- 最大10,000件、逐次チャンク処理を前提としています。大規模化時はAPIクォータ、partition step、出力方式の再設計が必要です。
-
-## AI利用について
-
-要件・採用技術・計算規則・運用方針は利用者が決定し、実装、レビュー、テスト、ドキュメント作成にAIを使用したプロジェクトです。公開・案件提案時は、各層の役割、バッチの処理順序、税計算、障害時の挙動を説明できる状態で使用することを想定しています。
+- ヘッダー行は1行目固定です。
+- 入力上限は既定10,000件、エラー詳細のDB保存は最大500件です。
+- Google Sheetsの登録時ヘッダー検証にはネットワーク、API権限、共有設定が必要です。
+- Google APIは接続5秒・応答30秒でタイムアウトします。長時間処理が必要な環境では環境変数で調整してください。
+- 出力直前の通信断ではGoogle側の反映有無を完全には判定できません。同じ実行結果で再度上書き可能な形式にしています。
+- Profile削除機能は未提供です。履歴と外部キーを保護するため、現バージョンは登録・編集・無効化を対象にしています。
+- 管理者は単一ユーザー構成です。
+- Batch executorとQuartz thread poolはともに既定2スレッドです。多数Profileの同時起動はキュー待ちになります。
+- 大規模化時はGoogle APIクォータ、partition step、出力方式の再設計が必要です。

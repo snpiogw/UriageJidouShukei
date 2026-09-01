@@ -52,8 +52,11 @@ public class BatchConfig {
 
     @Bean
     @StepScope
-    GoogleSalesItemReader googleSalesItemReader(SalesSheetGateway gateway, AppProperties properties) {
-        return new GoogleSalesItemReader(gateway, properties);
+    GoogleSalesItemReader googleSalesItemReader(
+            @Value("#{jobParameters['executionId']}") String executionId,
+            SalesSheetGateway gateway, AppProperties properties, AggregationExecutionRepository executions) {
+        AggregationExecutionEntity execution = executions.findById(UUID.fromString(executionId)).orElseThrow();
+        return new GoogleSalesItemReader(gateway, properties, execution.profileSnapshot());
     }
 
     @Bean

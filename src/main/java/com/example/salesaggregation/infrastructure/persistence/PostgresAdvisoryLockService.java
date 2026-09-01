@@ -13,22 +13,23 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class PostgresAdvisoryLockService {
-    private static final long SALES_JOB_LOCK = 7_314_991_281L;
+    private static final long SALES_JOB_LOCK_NAMESPACE = 7_314_991_281L;
     private final DataSource dataSource;
-    private final Map<UUID, Connection> heldConnections = new ConcurrentHashMap<>();
+    private final Map<UUID, HeldLock> heldConnections = new ConcurrentHashMap<>();
 
     public PostgresAdvisoryLockService(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
-    public boolean tryLock(UUID executionId) {
+    public boolean tryLock(UUID executionId, long profileId) {
+        long lockKey = lockKeyForProfile(profileId);
         try {
             Connection connection = dataSource.getConnection();
             try (PreparedStatement statement = connection.prepareStatement("select pg_try_advisory_lock(?)")) {
-                statement.setLong(1, SALES_JOB_LOCK);
+                statement.setLong(1, lockKey);
                 try (ResultSet rs = statement.executeQuery()) {
                     if (rs.next() && rs.getBoolean(1)) {
-                        heldConnections.put(executionId, connection);
+                        heldConnections.put(executionId, new HeldLock(connection, lockKey));
                         return true;
                     }
                 }
@@ -41,14 +42,20 @@ public class PostgresAdvisoryLockService {
     }
 
     public void unlock(UUID executionId) {
-        Connection connection = heldConnections.remove(executionId);
-        if (connection == null) return;
-        try (connection;
+        HeldLock held = heldConnections.remove(executionId);
+        if (held == null) return;
+        try (Connection connection = held.connection();
              PreparedStatement statement = connection.prepareStatement("select pg_advisory_unlock(?)")) {
-            statement.setLong(1, SALES_JOB_LOCK);
+            statement.setLong(1, held.lockKey());
             statement.execute();
         } catch (SQLException ignored) {
             // Closing the dedicated connection releases session advisory locks.
         }
+    }
+
+    private record HeldLock(Connection connection, long lockKey) {}
+
+    static long lockKeyForProfile(long profileId) {
+        return SALES_JOB_LOCK_NAMESPACE + profileId;
     }
 }

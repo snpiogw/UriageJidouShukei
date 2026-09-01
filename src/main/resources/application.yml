@@ -60,9 +60,14 @@ app:
     error-sheet: エラーログ
     max-rows: ${MAX_SALES_ROWS:10000}
     fetch-size: ${SHEETS_FETCH_SIZE:500}
+    connect-timeout-millis: ${SHEETS_CONNECT_TIMEOUT_MILLIS:5000}
+    read-timeout-millis: ${SHEETS_READ_TIMEOUT_MILLIS:30000}
   security:
     admin-username: ${ADMIN_USERNAME:admin}
     admin-password-hash: ${ADMIN_PASSWORD_HASH:}
   batch:
     chunk-size: ${BATCH_CHUNK_SIZE:500}
     transient-retry-count: ${BATCH_RETRY_COUNT:3}
+  retention:
+    execution-history-days: ${EXECUTION_HISTORY_DAYS:180}
+    cleanup-cron: "${EXECUTION_CLEANUP_CRON:0 15 3 * * *}"

@@ -30,7 +30,7 @@ public class PrepareExecutionTasklet implements Tasklet {
         UUID id = executionId(chunkContext);
         AggregationExecutionEntity execution = executions.findById(id).orElseThrow();
         workStore.clear(id);
-        sheets.validateHeader();
+        sheets.validateHeader(execution.profileSnapshot());
         execution.markRunning();
         executions.save(execution);
         return RepeatStatus.FINISHED;

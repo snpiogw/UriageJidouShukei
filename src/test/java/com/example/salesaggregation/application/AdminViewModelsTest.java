@@ -42,7 +42,7 @@ class AdminViewModelsTest {
 
     private AdminViewModels.ExecutionView executionView(ExecutionStatus status, BigDecimal taxRate,
                                                          String errorCode, String summary) {
-        return new AdminViewModels.ExecutionView(UUID.randomUUID(), TriggerType.MANUAL, status,
+        return new AdminViewModels.ExecutionView(UUID.randomUUID(), 1L, "既存設定", "Asia/Tokyo", TriggerType.MANUAL, status,
                 TaxMode.INCLUSIVE, taxRate, Instant.now(), Instant.now(), 1, 1, 0, errorCode, summary);
     }
 }

@@ -13,29 +13,39 @@ import java.util.UUID;
 
 @Service
 public class AggregationLaunchService {
-    private final SettingsService settingsService;
+    private final AggregationProfileService profileService;
     private final AggregationExecutionRepository executions;
+    private final ExecutionAttemptService attempts;
     private final JobLauncher launcher;
     private final Job job;
 
-    public AggregationLaunchService(SettingsService settingsService,
+    public AggregationLaunchService(AggregationProfileService profileService,
                                     AggregationExecutionRepository executions,
+                                    ExecutionAttemptService attempts,
                                     @Qualifier("asyncJobLauncher") JobLauncher launcher,
                                     Job salesAggregationJob) {
-        this.settingsService = settingsService;
+        this.profileService = profileService;
         this.executions = executions;
+        this.attempts = attempts;
         this.launcher = launcher;
         this.job = salesAggregationJob;
     }
 
-    public UUID launch(TriggerType triggerType) {
-        AggregationSettingsEntity settings = settingsService.current();
+    public UUID launch(long profileId, TriggerType triggerType) {
+        AggregationProfileEntity profile = profileService.get(profileId);
+        if (!profile.isActive()) {
+            throw new IllegalStateException("無効化された集計設定は実行できません");
+        }
+        if (profile.getSpreadsheetId().isBlank()) {
+            throw new IllegalStateException("Spreadsheet IDが未設定です。集計設定を編集してください");
+        }
         UUID id = UUID.randomUUID();
-        executions.saveAndFlush(new AggregationExecutionEntity(id, triggerType, settings.getTaxMode(),
-                settings.getTaxRate(), settings.getVersion()));
+        executions.saveAndFlush(new AggregationExecutionEntity(id, triggerType, profile.snapshot()));
+        attempts.queueInitial(id);
         try {
             JobParameters params = new JobParametersBuilder()
                     .addString("executionId", id.toString(), true)
+                    .addLong("profileId", profileId, false)
                     .addString("requestedAt", Instant.now().toString(), false)
                     .toJobParameters();
             launcher.run(job, params);
@@ -44,6 +54,7 @@ public class AggregationLaunchService {
             AggregationExecutionEntity execution = executions.findById(id).orElseThrow();
             execution.fail(ExecutionStatus.FAILED, "LAUNCH_FAILED", "バッチ処理を開始できませんでした");
             executions.save(execution);
+            attempts.fail(id, ExecutionStatus.FAILED, "LAUNCH_FAILED", "バッチ処理を開始できませんでした");
             throw new IllegalStateException("バッチ処理を開始できませんでした", ex);
         }
     }
@@ -54,12 +65,18 @@ public class AggregationLaunchService {
         if (execution.getStatus() != ExecutionStatus.FAILED) {
             throw new IllegalStateException("失敗した集計だけを再開できます");
         }
+        AggregationProfileEntity profile = profileService.get(execution.getProfileId());
+        if (!profile.isActive()) {
+            throw new IllegalStateException("無効化された集計設定は再開できません");
+        }
 
         execution.queueForRestart();
         executions.saveAndFlush(execution);
+        attempts.queueRestart(id);
         try {
             JobParameters params = new JobParametersBuilder()
                     .addString("executionId", id.toString(), true)
+                    .addLong("profileId", execution.getProfileId(), false)
                     .addString("requestedAt", Instant.now().toString(), false)
                     .toJobParameters();
             launcher.run(job, params);
@@ -68,6 +85,7 @@ public class AggregationLaunchService {
             AggregationExecutionEntity failed = executions.findById(id).orElseThrow();
             failed.fail(ExecutionStatus.FAILED, "RESTART_FAILED", "バッチ処理を再開できませんでした");
             executions.save(failed);
+            attempts.fail(id, ExecutionStatus.FAILED, "RESTART_FAILED", "バッチ処理を再開できませんでした");
             throw new IllegalStateException("バッチ処理を再開できませんでした", ex);
         }
     }

@@ -18,6 +18,7 @@ public class SalesAggregationQuartzJob implements Job {
 
     @Override
     public void execute(JobExecutionContext context) {
-        launchService.launch(TriggerType.SCHEDULED);
+        long profileId = context.getMergedJobDataMap().getLong("profileId");
+        launchService.launch(profileId, TriggerType.SCHEDULED);
     }
 }
