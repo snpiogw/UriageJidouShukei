@@ -21,9 +21,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class GoogleSalesItemReaderTest {
     private final SalesSheetGateway gateway = new InMemorySheetGateway();
     private final AppProperties properties = new AppProperties(
-            new AppProperties.Sheets("sheet", "売上データ", "集計結果", "エラーログ", 100, 4),
+            new AppProperties.Sheets("sheet", "売上データ", "集計結果", "エラーログ", 100, 4, 5_000, 30_000),
             new AppProperties.Security("admin", "hash"),
-            new AppProperties.Batch(2, 3));
+            new AppProperties.Batch(2, 3), new AppProperties.Retention(180, "0 15 3 * * *"));
     private final ExecutionProfileSnapshot profile = new ExecutionProfileSnapshot(1, "既存設定", "sheet",
             "売上データ", "集計結果", "エラーログ", TaxMode.INCLUSIVE, new BigDecimal("10"),
             "Asia/Tokyo", 0, ColumnMapping.DEFAULT);
@@ -57,8 +57,8 @@ class GoogleSalesItemReaderTest {
     @Test
     void stopsAtThePhysicalEndOfTheSheetGrid() throws Exception {
         AppProperties largeLimit = new AppProperties(
-                new AppProperties.Sheets("sheet", "売上データ", "集計結果", "エラーログ", 10_000, 500),
-                properties.security(), properties.batch());
+                new AppProperties.Sheets("sheet", "売上データ", "集計結果", "エラーログ", 10_000, 500, 5_000, 30_000),
+                properties.security(), properties.batch(), properties.retention());
         InMemorySheetGateway smallGrid = new InMemorySheetGateway(
                 List.of(InMemorySheetGateway.row(2)), 1_000);
         GoogleSalesItemReader reader = new GoogleSalesItemReader(smallGrid, largeLimit, profile);

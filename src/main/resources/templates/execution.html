@@ -6,6 +6,7 @@
   <meta th:if="${refresh}" http-equiv="refresh" content="2">
   <title>実行詳細 | 売上集計</title>
   <link rel="stylesheet" th:href="@{/css/app.css}">
+  <script defer th:src="@{/js/app.js}"></script>
 </head>
 <body>
 <header class="topbar"><div><p class="eyebrow">Execution</p><h1>実行詳細</h1></div><a class="button secondary" th:href="@{/admin/profiles/{id}/executions(id=${execution.profileId})}">履歴へ戻る</a></header>
@@ -26,7 +27,7 @@
     </div>
     <div class="alert" th:if="${execution.summary != null and !execution.hasIssueExplanation()}" th:text="${execution.summary}"></div>
     <p class="muted" th:if="${refresh}">処理中です。この画面は自動更新されます。</p>
-    <form th:if="${execution.restartable()}" th:action="@{/admin/executions/{id}/restart(id=${execution.id})}" method="post">
+    <form class="confirm-submit" data-confirm="失敗地点から集計を再開しますか？" th:if="${execution.restartable()}" th:action="@{/admin/executions/{id}/restart(id=${execution.id})}" method="post">
       <button type="submit">失敗地点から再開</button>
     </form>
   </section>
@@ -43,6 +44,13 @@
     <h2>除外された入力行</h2>
     <div class="table-wrap"><table><thead><tr><th>行</th><th>項目</th><th>コード</th><th>修正方法</th></tr></thead>
       <tbody><tr th:each="error : ${errors}"><td th:text="${error.rowNumber}"></td><td th:text="${error.field}"></td><td th:text="${error.code}"></td><td th:text="${error.guidance}"></td></tr></tbody>
+    </table></div>
+  </section>
+  <section class="panel">
+    <h2>実行試行履歴</h2>
+    <p class="muted">再開前の失敗原因と処理時間を保持します。</p>
+    <div class="table-wrap"><table><thead><tr><th>試行</th><th>受付日時</th><th>状態</th><th>処理時間</th><th>エラーコード</th><th>概要</th></tr></thead>
+      <tbody><tr th:each="attempt : ${attempts}"><td th:text="|#${attempt.attemptNumber}|"></td><td th:text="${#temporals.format(attempt.requestedAtLocal, 'yyyy-MM-dd HH:mm:ss')}"></td><td><span class="status" th:classappend="${attempt.status}" th:text="${attempt.status.label}"></span></td><td th:text="${attempt.durationDisplay()}"></td><td><code th:text="${attempt.errorCode ?: '—'}"></code></td><td th:text="${attempt.summary ?: '—'}"></td></tr></tbody>
     </table></div>
   </section>
 </main>

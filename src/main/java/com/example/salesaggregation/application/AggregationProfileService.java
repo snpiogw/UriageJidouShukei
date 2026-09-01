@@ -9,6 +9,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -16,6 +18,7 @@ import java.util.List;
 
 @Service
 public class AggregationProfileService {
+    private static final Logger log = LoggerFactory.getLogger(AggregationProfileService.class);
     public static final long LEGACY_PROFILE_ID = 1L;
     private final AggregationProfileRepository profiles;
     private final AggregationProfileValidationService validation;
@@ -34,7 +37,7 @@ public class AggregationProfileService {
 
     @Transactional(readOnly = true)
     public AggregationProfileEntity get(long id) {
-        return profiles.findById(id).orElseThrow(() -> new IllegalArgumentException("集計設定が見つかりません"));
+        return profiles.findById(id).orElseThrow(() -> new ResourceNotFoundException("集計設定が見つかりません"));
     }
 
     @Transactional(readOnly = true)
@@ -49,7 +52,7 @@ public class AggregationProfileService {
         validateHeader(snapshot(0, 0, command));
         AggregationProfileEntity entity = new AggregationProfileEntity(command.profileName(), command.spreadsheetId(),
                 command.sourceSheetName(), command.resultSheetName(), command.errorSheetName(), command.taxMode(),
-                command.taxRate(), command.autoEnabled(), command.executionTime(), command.timeZone(),
+                command.taxRate(), command.active(), command.autoEnabled(), command.executionTime(), command.timeZone(),
                 command.columnMapping(), actor);
         return save(entity);
     }
@@ -68,7 +71,8 @@ public class AggregationProfileService {
         if (headerChanged) validateHeader(snapshot(id, expectedVersion, command));
         entity.update(command.profileName(), command.spreadsheetId(), command.sourceSheetName(),
                 command.resultSheetName(), command.errorSheetName(), command.taxMode(), command.taxRate(),
-                command.autoEnabled(), command.executionTime(), command.timeZone(), command.columnMapping(), actor);
+                command.active(), command.autoEnabled(), command.executionTime(), command.timeZone(),
+                command.columnMapping(), actor);
         return save(entity);
     }
 
@@ -84,7 +88,11 @@ public class AggregationProfileService {
         try {
             sheets.validateHeader(snapshot);
         } catch (IOException ex) {
-            throw new IllegalArgumentException("Google Sheetのヘッダーを確認できません: " + ex.getMessage(), ex);
+            log.warn("Google Sheet header validation failed for profile {} ({})",
+                    snapshot.profileId(), ex.getClass().getSimpleName());
+            log.debug("Google Sheet header validation details", ex);
+            throw new IllegalArgumentException(
+                    "Google Sheetのヘッダーを確認できません。共有権限、入力シート名、列マッピングを確認してください", ex);
         }
     }
 

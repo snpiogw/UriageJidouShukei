@@ -4,6 +4,7 @@ import com.example.salesaggregation.application.*;
 import com.example.salesaggregation.domain.ColumnMapping;
 import com.example.salesaggregation.domain.TaxMode;
 import com.example.salesaggregation.domain.TriggerType;
+import com.example.salesaggregation.domain.ExecutionStatus;
 import com.example.salesaggregation.infrastructure.persistence.AggregationProfileEntity;
 import jakarta.validation.Valid;
 import org.quartz.SchedulerException;
@@ -17,6 +18,7 @@ import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.List;
 
 @Controller
 public class AdminController {
@@ -110,10 +112,15 @@ public class AdminController {
     }
 
     @GetMapping("/admin/profiles/{id}/executions")
-    String history(@PathVariable long id, Model model) {
-        AdminQueryService.ProfileHistory history = queries.profileHistory(id);
+    String history(@PathVariable long id,
+                   @RequestParam(defaultValue = "0") int page,
+                   @RequestParam(required = false) ExecutionStatus status,
+                   Model model) {
+        AdminQueryService.ProfileHistory history = queries.profileHistory(id, page, status);
         model.addAttribute("profile", history.profile());
         model.addAttribute("history", history.history());
+        model.addAttribute("statusFilter", history.statusFilter());
+        model.addAttribute("statuses", ExecutionStatus.values());
         return "profile-history";
     }
 
@@ -122,6 +129,7 @@ public class AdminController {
         AdminQueryService.ExecutionDetail detail = queries.execution(id);
         model.addAttribute("execution", detail.execution());
         model.addAttribute("errors", detail.errors());
+        model.addAttribute("attempts", detail.attempts());
         model.addAttribute("refresh", !detail.execution().status().isTerminal());
         return "execution";
     }
@@ -140,6 +148,8 @@ public class AdminController {
     private String profileForm(Model model, Long id) {
         model.addAttribute("profileId", id);
         model.addAttribute("taxModes", TaxMode.values());
+        model.addAttribute("timeZones", List.of("Asia/Tokyo", "UTC", "Asia/Seoul", "Asia/Singapore",
+                "America/Los_Angeles", "America/New_York", "Europe/London"));
         model.addAttribute("pageTitle", id == null ? "集計設定の新規登録" : "集計設定の編集");
         return "profile-form";
     }
@@ -154,6 +164,7 @@ public class AdminController {
         form.setTaxMode(profile.getTaxMode());
         BigDecimal rate = profile.getTaxRate().stripTrailingZeros();
         form.setTaxRate(rate.scale() < 0 ? rate.setScale(0) : rate);
+        form.setActive(profile.isActive());
         form.setAutoEnabled(profile.isAutoEnabled());
         form.setExecutionTime(profile.getExecutionTime());
         form.setTimeZone(profile.getTimeZone());

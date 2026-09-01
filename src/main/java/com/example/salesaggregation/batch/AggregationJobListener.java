@@ -4,6 +4,7 @@ import com.example.salesaggregation.domain.ExecutionStatus;
 import com.example.salesaggregation.infrastructure.persistence.AggregationExecutionEntity;
 import com.example.salesaggregation.infrastructure.persistence.AggregationExecutionRepository;
 import com.example.salesaggregation.infrastructure.persistence.PostgresAdvisoryLockService;
+import com.example.salesaggregation.application.ExecutionAttemptService;
 import org.springframework.batch.core.*;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
@@ -15,10 +16,19 @@ import java.util.UUID;
 public class AggregationJobListener implements JobExecutionListener {
     private final AggregationExecutionRepository executions;
     private final PostgresAdvisoryLockService locks;
+    private final ExecutionAttemptService attempts;
 
-    public AggregationJobListener(AggregationExecutionRepository executions, PostgresAdvisoryLockService locks) {
+    public AggregationJobListener(AggregationExecutionRepository executions, PostgresAdvisoryLockService locks,
+                                  ExecutionAttemptService attempts) {
         this.executions = executions;
         this.locks = locks;
+        this.attempts = attempts;
+    }
+
+    @Override
+    public void beforeJob(JobExecution jobExecution) {
+        String rawId = jobExecution.getJobParameters().getString("executionId");
+        if (rawId != null) attempts.markRunning(UUID.fromString(rawId));
     }
 
     @Override
@@ -33,6 +43,7 @@ public class AggregationJobListener implements JobExecutionListener {
                 FailureDetails failure = describeFailure(jobExecution);
                 execution.fail(failure.status(), failure.code(), failure.summary());
                 executions.save(execution);
+                attempts.fail(id, failure.status(), failure.code(), failure.summary());
             }
         } finally {
             locks.unlock(id);

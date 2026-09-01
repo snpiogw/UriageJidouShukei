@@ -36,16 +36,20 @@ class V4MigrationIntegrationTest {
                      source_count,valid_count,invalid_count,error_code,summary)
                 values (?,'MANUAL','FAILED','EXCLUSIVE',8.0000,7,current_timestamp,10,8,2,'BATCH_FAILED','failed')
                 """, failedId);
+        jdbc.update("insert into aggregation_product_work values (?, '商品A', 1000)", failedId);
+        jdbc.update("insert into aggregation_staff_work values (?, '田中', 1000)", failedId);
+        jdbc.update("insert into aggregation_monthly_work values (?, '2026-09', 1000)", failedId);
 
         Flyway.configure().dataSource(dataSource).load().migrate();
 
         Map<String, Object> profile = jdbc.queryForMap("""
-                select profile_name,tax_mode,tax_rate,execution_time,time_zone,date_column,staff_column,
+                select profile_name,tax_mode,tax_rate,active,execution_time,time_zone,date_column,staff_column,
                        product_column,quantity_column,unit_price_column,version
                   from aggregation_profile where id=1
                 """);
         assertThat(profile.get("profile_name")).isEqualTo("既存設定");
         assertThat(profile.get("tax_mode")).isEqualTo("EXCLUSIVE");
+        assertThat(profile.get("active")).isEqualTo(true);
         assertThat(profile.get("version")).isEqualTo(7L);
         assertThat(profile.get("date_column")).isEqualTo("日付");
         assertThat(jdbc.queryForObject(
@@ -55,5 +59,20 @@ class V4MigrationIntegrationTest {
                 .isEqualTo("既存設定");
         assertThat(jdbc.queryForObject(
                 "select count(*) from aggregation_execution where id=?", Integer.class, failedId)).isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "select count(*) from aggregation_execution_attempt where execution_id=?", Integer.class, failedId))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject(
+                "select status from aggregation_execution_attempt where execution_id=?", String.class, failedId))
+                .isEqualTo("FAILED");
+        assertThat(jdbc.queryForObject(
+                "select count(*) from aggregation_product_work where execution_id=?", Integer.class, failedId))
+                .isZero();
+        assertThat(jdbc.queryForObject(
+                "select count(*) from aggregation_staff_work where execution_id=?", Integer.class, failedId))
+                .isZero();
+        assertThat(jdbc.queryForObject(
+                "select count(*) from aggregation_monthly_work where execution_id=?", Integer.class, failedId))
+                .isZero();
     }
 }

@@ -20,27 +20,48 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class AggregationLaunchServiceTest {
 
     @Test
+    void refusesToLaunchAnInactiveProfile() {
+        AggregationProfileService profiles = mock(AggregationProfileService.class);
+        AggregationProfileEntity profile = mock(AggregationProfileEntity.class);
+        AggregationExecutionRepository executions = mock(AggregationExecutionRepository.class);
+        ExecutionAttemptService attempts = mock(ExecutionAttemptService.class);
+        JobLauncher launcher = mock(JobLauncher.class);
+        Job job = mock(Job.class);
+        when(profiles.get(9L)).thenReturn(profile);
+
+        AggregationLaunchService service = new AggregationLaunchService(
+                profiles, executions, attempts, launcher, job);
+
+        assertThatThrownBy(() -> service.launch(9L, TriggerType.MANUAL))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("無効化");
+        verifyNoInteractions(executions, attempts, launcher);
+    }
+
+    @Test
     void launchesTheSelectedProfileWithOnlyExecutionIdAsIdentifyingParameter() throws Exception {
         AggregationProfileService profiles = mock(AggregationProfileService.class);
         AggregationProfileEntity profile = mock(AggregationProfileEntity.class);
         AggregationExecutionRepository executions = mock(AggregationExecutionRepository.class);
+        ExecutionAttemptService attempts = mock(ExecutionAttemptService.class);
         JobLauncher launcher = mock(JobLauncher.class);
         Job job = mock(Job.class);
         ExecutionProfileSnapshot snapshot = new ExecutionProfileSnapshot(22, "店舗B", "sheet-b", "入力",
                 "結果", "エラー", TaxMode.INCLUSIVE, BigDecimal.TEN, "Asia/Tokyo", 3, ColumnMapping.DEFAULT);
         when(profiles.get(22)).thenReturn(profile);
         when(profile.getSpreadsheetId()).thenReturn("sheet-b");
+        when(profile.isActive()).thenReturn(true);
         when(profile.snapshot()).thenReturn(snapshot);
         when(launcher.run(eq(job), any(JobParameters.class))).thenAnswer(invocation ->
                 new JobExecution(1L, invocation.getArgument(1)));
 
-        UUID id = new AggregationLaunchService(profiles, executions, launcher, job)
+        UUID id = new AggregationLaunchService(profiles, executions, attempts, launcher, job)
                 .launch(22, TriggerType.MANUAL);
 
         ArgumentCaptor<JobParameters> parameters = ArgumentCaptor.forClass(JobParameters.class);
@@ -61,14 +82,18 @@ class AggregationLaunchServiceTest {
         execution.fail(ExecutionStatus.FAILED, "BATCH_FAILED", "failed");
 
         AggregationProfileService profiles = mock(AggregationProfileService.class);
+        AggregationProfileEntity profile = mock(AggregationProfileEntity.class);
         AggregationExecutionRepository executions = mock(AggregationExecutionRepository.class);
+        ExecutionAttemptService attempts = mock(ExecutionAttemptService.class);
         JobLauncher launcher = mock(JobLauncher.class);
         Job job = mock(Job.class);
         when(executions.findById(id)).thenReturn(Optional.of(execution));
+        when(profiles.get(1L)).thenReturn(profile);
+        when(profile.isActive()).thenReturn(true);
         when(launcher.run(eq(job), any(JobParameters.class))).thenAnswer(invocation ->
                 new JobExecution(2L, invocation.getArgument(1)));
 
-        AggregationLaunchService service = new AggregationLaunchService(profiles, executions, launcher, job);
+        AggregationLaunchService service = new AggregationLaunchService(profiles, executions, attempts, launcher, job);
         service.restart(id);
 
         ArgumentCaptor<JobParameters> parameters = ArgumentCaptor.forClass(JobParameters.class);

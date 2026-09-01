@@ -13,17 +13,35 @@ public final class AdminViewModels {
 
     public record ProfileView(long id, String profileName, String spreadsheetId, String sourceSheetName,
                               String resultSheetName, String errorSheetName, TaxMode taxMode,
-                              BigDecimal taxRate, boolean autoEnabled, LocalTime executionTime,
+                              BigDecimal taxRate, boolean active, boolean autoEnabled, LocalTime executionTime,
                               String timeZone, long version, ColumnMapping columnMapping,
-                              ZonedDateTime nextExecution) {
+                              ZonedDateTime nextExecution, ExecutionView latestExecution) {
         public static ProfileView from(AggregationProfileEntity entity, ZonedDateTime nextExecution) {
+            return from(entity, nextExecution, null);
+        }
+
+        public static ProfileView from(AggregationProfileEntity entity, ZonedDateTime nextExecution,
+                                       AggregationExecutionEntity latestExecution) {
             return new ProfileView(entity.getId(), entity.getProfileName(), entity.getSpreadsheetId(),
                     entity.getSourceSheetName(), entity.getResultSheetName(), entity.getErrorSheetName(),
-                    entity.getTaxMode(), entity.getTaxRate(), entity.isAutoEnabled(), entity.getExecutionTime(),
-                    entity.getTimeZone(), entity.getVersion(), entity.columnMapping(), nextExecution);
+                    entity.getTaxMode(), entity.getTaxRate(), entity.isActive(), entity.isAutoEnabled(),
+                    entity.getExecutionTime(), entity.getTimeZone(), entity.getVersion(), entity.columnMapping(),
+                    nextExecution, latestExecution == null ? null : ExecutionView.from(latestExecution));
         }
 
         public boolean configured() { return spreadsheetId != null && !spreadsheetId.isBlank(); }
+        public boolean runnable() { return active && configured(); }
+        public String stateLabel() {
+            if (!active) return "無効";
+            return configured() ? "設定済み" : "要設定";
+        }
+        public String stateCss() {
+            if (!active) return "DISABLED";
+            return configured() ? "SUCCESS" : "FAILED";
+        }
+        public String spreadsheetUrl() {
+            return configured() ? "https://docs.google.com/spreadsheets/d/" + spreadsheetId + "/edit" : null;
+        }
         public String spreadsheetIdDisplay() {
             if (!configured()) return "未設定";
             return spreadsheetId.length() <= 16 ? spreadsheetId
@@ -34,18 +52,36 @@ public final class AdminViewModels {
     public record ExecutionView(UUID id, long profileId, String profileName, String timeZone,
                                 TriggerType triggerType, ExecutionStatus status,
                                 TaxMode taxMode, BigDecimal taxRate, Instant requestedAt,
-                                Instant completedAt, long sourceCount, long validCount,
+                                Instant startedAt, Instant completedAt, long sourceCount, long validCount,
                                 long invalidCount, String errorCode, String summary) {
+        public ExecutionView(UUID id, long profileId, String profileName, String timeZone,
+                             TriggerType triggerType, ExecutionStatus status, TaxMode taxMode,
+                             BigDecimal taxRate, Instant requestedAt, Instant completedAt,
+                             long sourceCount, long validCount, long invalidCount,
+                             String errorCode, String summary) {
+            this(id, profileId, profileName, timeZone, triggerType, status, taxMode, taxRate,
+                    requestedAt, null, completedAt, sourceCount, validCount, invalidCount, errorCode, summary);
+        }
+
         public static ExecutionView from(AggregationExecutionEntity entity) {
             ExecutionProfileSnapshot profile = entity.profileSnapshot();
             return new ExecutionView(entity.getId(), entity.getProfileId(), entity.getProfileNameSnapshot(),
                     profile.timeZone(), entity.getTriggerType(), entity.getStatus(), entity.getTaxMode(),
-                    entity.getTaxRate(), entity.getRequestedAt(), entity.getCompletedAt(), entity.getSourceCount(),
-                    entity.getValidCount(), entity.getInvalidCount(), entity.getErrorCode(), entity.getSummary());
+                    entity.getTaxRate(), entity.getRequestedAt(), entity.getStartedAt(), entity.getCompletedAt(),
+                    entity.getSourceCount(), entity.getValidCount(), entity.getInvalidCount(),
+                    entity.getErrorCode(), entity.getSummary());
         }
 
         public ZonedDateTime requestedAtLocal() { return requestedAt.atZone(zone()); }
         public ZonedDateTime completedAtLocal() { return completedAt == null ? null : completedAt.atZone(zone()); }
+        public String durationDisplay() {
+            if (startedAt == null || completedAt == null) return "—";
+            long seconds = Math.max(0, Duration.between(startedAt, completedAt).getSeconds());
+            if (seconds < 60) return seconds + "秒";
+            long minutes = seconds / 60;
+            long remainder = seconds % 60;
+            return minutes + "分" + remainder + "秒";
+        }
         private ZoneId zone() {
             try { return ZoneId.of(timeZone); }
             catch (DateTimeException ex) { return ZoneId.of("Asia/Tokyo"); }
@@ -81,6 +117,29 @@ public final class AdminViewModels {
                 case "LAUNCH_FAILED", "RESTART_FAILED" -> "実行基盤の状態を確認してから、もう一度操作してください。";
                 default -> "実行IDを添えてサーバーログを確認し、原因を解消してから再開してください。";
             };
+        }
+    }
+
+    public record AttemptView(int attemptNumber, ExecutionStatus status, Instant requestedAt,
+                              Instant startedAt, Instant completedAt, String errorCode, String summary,
+                              String timeZone) {
+        public static AttemptView from(com.example.salesaggregation.infrastructure.persistence.AggregationExecutionAttemptEntity entity,
+                                       String timeZone) {
+            return new AttemptView(entity.getAttemptNumber(), entity.getStatus(), entity.getRequestedAt(),
+                    entity.getStartedAt(), entity.getCompletedAt(), entity.getErrorCode(), entity.getSummary(), timeZone);
+        }
+
+        public ZonedDateTime requestedAtLocal() { return requestedAt.atZone(zone()); }
+        public ZonedDateTime completedAtLocal() { return completedAt == null ? null : completedAt.atZone(zone()); }
+        public String durationDisplay() {
+            if (startedAt == null || completedAt == null) return "—";
+            long seconds = Math.max(0, Duration.between(startedAt, completedAt).getSeconds());
+            if (seconds < 60) return seconds + "秒";
+            return seconds / 60 + "分" + seconds % 60 + "秒";
+        }
+        private ZoneId zone() {
+            try { return ZoneId.of(timeZone); }
+            catch (DateTimeException ex) { return ZoneId.of("Asia/Tokyo"); }
         }
     }
 }

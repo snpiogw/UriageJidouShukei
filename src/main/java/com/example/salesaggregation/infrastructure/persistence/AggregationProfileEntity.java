@@ -33,6 +33,8 @@ public class AggregationProfileEntity {
     private TaxMode taxMode;
     @Column(name = "tax_rate", nullable = false, precision = 9, scale = 4)
     private BigDecimal taxRate;
+    @Column(nullable = false)
+    private boolean active;
     @Column(name = "auto_enabled", nullable = false)
     private boolean autoEnabled;
     @Column(name = "execution_time", nullable = false)
@@ -66,17 +68,25 @@ public class AggregationProfileEntity {
                                     String resultSheetName, String errorSheetName, TaxMode taxMode,
                                     BigDecimal taxRate, boolean autoEnabled, LocalTime executionTime,
                                     String timeZone, ColumnMapping mapping, String actor) {
+        this(profileName, spreadsheetId, sourceSheetName, resultSheetName, errorSheetName, taxMode,
+                taxRate, true, autoEnabled, executionTime, timeZone, mapping, actor);
+    }
+
+    public AggregationProfileEntity(String profileName, String spreadsheetId, String sourceSheetName,
+                                    String resultSheetName, String errorSheetName, TaxMode taxMode,
+                                    BigDecimal taxRate, boolean active, boolean autoEnabled, LocalTime executionTime,
+                                    String timeZone, ColumnMapping mapping, String actor) {
         this.createdAt = Instant.now();
         updateValues(profileName, spreadsheetId, sourceSheetName, resultSheetName, errorSheetName,
-                taxMode, taxRate, autoEnabled, executionTime, timeZone, mapping, actor);
+                taxMode, taxRate, active, autoEnabled, executionTime, timeZone, mapping, actor);
     }
 
     public void update(String profileName, String spreadsheetId, String sourceSheetName,
                        String resultSheetName, String errorSheetName, TaxMode taxMode,
-                       BigDecimal taxRate, boolean autoEnabled, LocalTime executionTime,
+                       BigDecimal taxRate, boolean active, boolean autoEnabled, LocalTime executionTime,
                        String timeZone, ColumnMapping mapping, String actor) {
         updateValues(profileName, spreadsheetId, sourceSheetName, resultSheetName, errorSheetName,
-                taxMode, taxRate, autoEnabled, executionTime, timeZone, mapping, actor);
+                taxMode, taxRate, active, autoEnabled, executionTime, timeZone, mapping, actor);
     }
 
     public void fillLegacySpreadsheetId(String spreadsheetId, String actor) {
@@ -88,7 +98,7 @@ public class AggregationProfileEntity {
 
     private void updateValues(String profileName, String spreadsheetId, String sourceSheetName,
                               String resultSheetName, String errorSheetName, TaxMode taxMode,
-                              BigDecimal taxRate, boolean autoEnabled, LocalTime executionTime,
+                              BigDecimal taxRate, boolean active, boolean autoEnabled, LocalTime executionTime,
                               String timeZone, ColumnMapping mapping, String actor) {
         this.profileName = profileName.trim();
         this.spreadsheetId = spreadsheetId.trim();
@@ -97,6 +107,7 @@ public class AggregationProfileEntity {
         this.errorSheetName = errorSheetName.trim();
         this.taxMode = taxMode;
         this.taxRate = taxRate;
+        this.active = active;
         this.autoEnabled = autoEnabled;
         this.executionTime = executionTime;
         this.timeZone = timeZone;
@@ -126,6 +137,7 @@ public class AggregationProfileEntity {
     public String getErrorSheetName() { return errorSheetName; }
     public TaxMode getTaxMode() { return taxMode; }
     public BigDecimal getTaxRate() { return taxRate; }
+    public boolean isActive() { return active; }
     public boolean isAutoEnabled() { return autoEnabled; }
     public LocalTime getExecutionTime() { return executionTime; }
     public String getTimeZone() { return timeZone; }

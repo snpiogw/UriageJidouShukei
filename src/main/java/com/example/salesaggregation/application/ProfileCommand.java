@@ -14,8 +14,16 @@ public record ProfileCommand(
         String errorSheetName,
         TaxMode taxMode,
         BigDecimal taxRate,
+        boolean active,
         boolean autoEnabled,
         LocalTime executionTime,
         String timeZone,
         ColumnMapping columnMapping) {
+    public ProfileCommand(String profileName, String spreadsheetId, String sourceSheetName,
+                          String resultSheetName, String errorSheetName, TaxMode taxMode,
+                          BigDecimal taxRate, boolean autoEnabled, LocalTime executionTime,
+                          String timeZone, ColumnMapping columnMapping) {
+        this(profileName, spreadsheetId, sourceSheetName, resultSheetName, errorSheetName, taxMode,
+                taxRate, true, autoEnabled, executionTime, timeZone, columnMapping);
+    }
 }

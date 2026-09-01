@@ -18,13 +18,18 @@ import java.util.List;
 public class GoogleSheetsConfig {
     @Bean
     @Lazy
-    Sheets sheetsClient() throws IOException, GeneralSecurityException {
+    Sheets sheetsClient(AppProperties properties) throws IOException, GeneralSecurityException {
         GoogleCredentials credentials = GoogleCredentials.getApplicationDefault()
                 .createScoped(List.of(SheetsScopes.SPREADSHEETS));
+        HttpCredentialsAdapter credentialsAdapter = new HttpCredentialsAdapter(credentials);
         return new Sheets.Builder(
                 GoogleNetHttpTransport.newTrustedTransport(),
                 GsonFactory.getDefaultInstance(),
-                new HttpCredentialsAdapter(credentials))
+                request -> {
+                    credentialsAdapter.initialize(request);
+                    request.setConnectTimeout(properties.sheets().connectTimeoutMillis());
+                    request.setReadTimeout(properties.sheets().readTimeoutMillis());
+                })
                 .setApplicationName("sales-aggregation")
                 .build();
     }

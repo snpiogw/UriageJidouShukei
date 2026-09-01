@@ -97,6 +97,8 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         requests.add(clearRequest(ids.get(profile.errorSheetName()), OUTPUT_ROWS_TO_CLEAR, 6));
         requests.add(updateRequest(ids.get(profile.resultSheetName()), resultRows));
         requests.add(updateRequest(ids.get(profile.errorSheetName()), errorRows));
+        requests.addAll(resultFormattingRequests(ids.get(profile.resultSheetName())));
+        requests.addAll(errorFormattingRequests(ids.get(profile.errorSheetName())));
         batchUpdate(profile, requests);
     }
 
@@ -105,8 +107,57 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         Map<String, Integer> ids = ensureOutputSheets(profile);
         List<Request> requests = List.of(
                 clearRequest(ids.get(profile.errorSheetName()), OUTPUT_ROWS_TO_CLEAR, 6),
-                updateRequest(ids.get(profile.errorSheetName()), errorMatrix(profile, executionId, errors)));
+                updateRequest(ids.get(profile.errorSheetName()), errorMatrix(profile, executionId, errors)),
+                errorHeaderRequest(ids.get(profile.errorSheetName())),
+                freezeRowsRequest(ids.get(profile.errorSheetName()), 1),
+                autoResizeRequest(ids.get(profile.errorSheetName()), 6));
         batchUpdate(profile, requests);
+    }
+
+    private List<Request> resultFormattingRequests(int sheetId) {
+        return List.of(
+                formatRequest(sheetId, 0, 9, 0, 1, new Color().setRed(.91f).setGreen(.95f).setBlue(.93f),
+                        new Color().setRed(.09f).setGreen(.31f).setBlue(.23f), false),
+                formatRequest(sheetId, 10, 11, 0, 11, new Color().setRed(.09f).setGreen(.42f).setBlue(.30f),
+                        new Color().setRed(1f).setGreen(1f).setBlue(1f), true),
+                freezeRowsRequest(sheetId, 11),
+                autoResizeRequest(sheetId, 11));
+    }
+
+    private List<Request> errorFormattingRequests(int sheetId) {
+        return List.of(errorHeaderRequest(sheetId), freezeRowsRequest(sheetId, 1), autoResizeRequest(sheetId, 6));
+    }
+
+    private Request errorHeaderRequest(int sheetId) {
+        return formatRequest(sheetId, 0, 1, 0, 6,
+                new Color().setRed(.65f).setGreen(.22f).setBlue(.22f),
+                new Color().setRed(1f).setGreen(1f).setBlue(1f), true);
+    }
+
+    private Request formatRequest(int sheetId, int startRow, int endRow, int startColumn, int endColumn,
+                                  Color background, Color foreground, boolean centered) {
+        CellFormat format = new CellFormat()
+                .setBackgroundColor(background)
+                .setTextFormat(new TextFormat().setBold(true).setForegroundColor(foreground));
+        if (centered) format.setHorizontalAlignment("CENTER");
+        return new Request().setRepeatCell(new RepeatCellRequest()
+                .setRange(new GridRange().setSheetId(sheetId).setStartRowIndex(startRow).setEndRowIndex(endRow)
+                        .setStartColumnIndex(startColumn).setEndColumnIndex(endColumn))
+                .setCell(new CellData().setUserEnteredFormat(format))
+                .setFields("userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)"));
+    }
+
+    private Request freezeRowsRequest(int sheetId, int rows) {
+        return new Request().setUpdateSheetProperties(new UpdateSheetPropertiesRequest()
+                .setProperties(new SheetProperties().setSheetId(sheetId)
+                        .setGridProperties(new GridProperties().setFrozenRowCount(rows)))
+                .setFields("gridProperties.frozenRowCount"));
+    }
+
+    private Request autoResizeRequest(int sheetId, int columns) {
+        return new Request().setAutoResizeDimensions(new AutoResizeDimensionsRequest()
+                .setDimensions(new DimensionRange().setSheetId(sheetId).setDimension("COLUMNS")
+                        .setStartIndex(0).setEndIndex(columns)));
     }
 
     private void batchUpdate(ExecutionProfileSnapshot profile, List<Request> requests) throws IOException {
@@ -203,7 +254,8 @@ public class GoogleSheetsGateway implements SalesSheetGateway {
         rows.add(List.of("完了日時", DATE_TIME.format(result.completedAt().atZone(ZoneId.of(profile.timeZone())))));
         rows.add(List.of("集計設定", profile.profileName()));
         rows.add(List.of("税区分", result.taxMode().label()));
-        rows.add(List.of("税率", result.taxRate().toPlainString() + "%"));
+        BigDecimal displayRate = result.taxRate().stripTrailingZeros();
+        rows.add(List.of("税率", (displayRate.scale() < 0 ? displayRate.setScale(0) : displayRate).toPlainString() + "%"));
         rows.add(List.of("設定バージョン", result.settingsVersion()));
         rows.add(List.of("対象行数", result.sourceCount()));
         rows.add(List.of("正常行数", result.validCount()));

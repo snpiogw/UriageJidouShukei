@@ -27,6 +27,7 @@ public class AggregationProfileForm {
     @DecimalMax(value = "100.0000", message = "税率は100以下にしてください")
     @Digits(integer = 3, fraction = 4, message = "税率は小数4桁以内にしてください")
     private BigDecimal taxRate;
+    private boolean active;
     private boolean autoEnabled;
     @NotNull(message = "実行時刻を入力してください") @DateTimeFormat(pattern = "HH:mm")
     private LocalTime executionTime;
@@ -50,6 +51,7 @@ public class AggregationProfileForm {
         errorSheetName = "エラーログ";
         taxMode = TaxMode.INCLUSIVE;
         taxRate = new BigDecimal("10");
+        active = true;
         executionTime = LocalTime.of(21, 0);
         timeZone = "Asia/Tokyo";
         dateColumn = "日付";
@@ -61,7 +63,7 @@ public class AggregationProfileForm {
 
     public ProfileCommand toCommand() {
         return new ProfileCommand(profileName, spreadsheetId, sourceSheetName, resultSheetName, errorSheetName,
-                taxMode, taxRate, autoEnabled, executionTime, timeZone,
+                taxMode, taxRate, active, autoEnabled, executionTime, timeZone,
                 new ColumnMapping(dateColumn, staffColumn, productColumn, quantityColumn, unitPriceColumn));
     }
 
@@ -79,6 +81,8 @@ public class AggregationProfileForm {
     public void setTaxMode(TaxMode taxMode) { this.taxMode = taxMode; }
     public BigDecimal getTaxRate() { return taxRate; }
     public void setTaxRate(BigDecimal taxRate) { this.taxRate = taxRate; }
+    public boolean isActive() { return active; }
+    public void setActive(boolean active) { this.active = active; }
     public boolean isAutoEnabled() { return autoEnabled; }
     public void setAutoEnabled(boolean autoEnabled) { this.autoEnabled = autoEnabled; }
     public LocalTime getExecutionTime() { return executionTime; }

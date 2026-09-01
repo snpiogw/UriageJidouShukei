@@ -45,7 +45,7 @@ public class QuartzScheduleService {
                     .requestRecovery()
                     .build(), false);
         }
-        if (!profile.isAutoEnabled() || profile.getSpreadsheetId().isBlank()) {
+        if (!profile.isActive() || !profile.isAutoEnabled() || profile.getSpreadsheetId().isBlank()) {
             if (scheduler.checkExists(triggerKey)) scheduler.unscheduleJob(triggerKey);
             return;
         }

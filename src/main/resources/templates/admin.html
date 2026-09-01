@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>集計設定一覧 | 売上集計</title><link rel="stylesheet" th:href="@{/css/app.css}">
+  <script defer th:src="@{/js/app.js}"></script>
 </head>
 <body>
 <header class="topbar">
@@ -19,18 +20,24 @@
       <article class="profile-card" th:each="profile : ${profiles}">
         <div class="profile-main">
           <div><h2 th:text="${profile.profileName}">店舗A</h2>
-            <p class="muted" th:text="|${profile.sourceSheetName} / ${profile.spreadsheetIdDisplay()}|"></p></div>
-          <span class="status" th:classappend="${profile.configured ? 'SUCCESS' : 'FAILED'}"
-                th:text="${profile.configured ? '設定済み' : '要設定'}"></span>
+            <p class="muted"><span th:text="${profile.sourceSheetName}"></span> /
+              <a th:if="${profile.configured}" th:href="${profile.spreadsheetUrl()}" target="_blank" rel="noopener noreferrer"
+                 th:text="${profile.spreadsheetIdDisplay()}" aria-label="Googleスプレッドシートを開く"></a>
+              <span th:unless="${profile.configured}">未設定</span></p></div>
+          <span class="status" th:classappend="${profile.stateCss()}" th:text="${profile.stateLabel()}"></span>
         </div>
         <dl class="profile-facts">
-          <div><dt>自動実行</dt><dd th:text="${profile.autoEnabled ? #temporals.format(profile.executionTime, 'HH:mm') : 'OFF'}"></dd></div>
+          <div><dt>自動実行</dt><dd th:text="${profile.active and profile.autoEnabled ? #temporals.format(profile.executionTime, 'HH:mm') : 'OFF'}"></dd></div>
           <div><dt>タイムゾーン</dt><dd th:text="${profile.timeZone}"></dd></div>
           <div><dt>次回実行</dt><dd th:text="${profile.nextExecution != null ? #temporals.format(profile.nextExecution, 'yyyy-MM-dd HH:mm') : '予定なし'}"></dd></div>
+          <div><dt>最終実行</dt><dd th:if="${profile.latestExecution != null}"><span class="status" th:classappend="${profile.latestExecution.status}"
+                th:text="${profile.latestExecution.status.label}"></span><small th:text="|正常 ${profile.latestExecution.validCount} / 除外 ${profile.latestExecution.invalidCount} / ${profile.latestExecution.durationDisplay()}|"></small></dd>
+            <dd th:unless="${profile.latestExecution != null}">未実行</dd></div>
         </dl>
         <div class="profile-actions">
           <a class="button secondary" th:href="@{/admin/profiles/{id}/edit(id=${profile.id})}">編集</a>
-          <form th:action="@{/admin/profiles/{id}/executions(id=${profile.id})}" method="post"><button type="submit" th:disabled="${!profile.configured}">今すぐ集計</button></form>
+          <form class="confirm-submit" data-confirm="この集計設定を今すぐ実行しますか？"
+                th:action="@{/admin/profiles/{id}/executions(id=${profile.id})}" method="post"><button type="submit" th:disabled="${!profile.runnable()}">今すぐ集計</button></form>
           <a class="button secondary" th:href="@{/admin/profiles/{id}/executions(id=${profile.id})}">履歴</a>
         </div>
       </article>

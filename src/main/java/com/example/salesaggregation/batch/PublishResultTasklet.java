@@ -3,6 +3,7 @@ package com.example.salesaggregation.batch;
 import com.example.salesaggregation.domain.*;
 import com.example.salesaggregation.infrastructure.google.SalesSheetGateway;
 import com.example.salesaggregation.infrastructure.persistence.*;
+import com.example.salesaggregation.application.ExecutionAttemptService;
 import org.springframework.batch.core.StepContribution;
 import org.springframework.batch.core.scope.context.ChunkContext;
 import org.springframework.batch.core.step.tasklet.Tasklet;
@@ -21,12 +22,14 @@ public class PublishResultTasklet implements Tasklet {
     private final AggregationExecutionRepository executions;
     private final AggregationWorkStore workStore;
     private final SalesSheetGateway sheets;
+    private final ExecutionAttemptService attempts;
 
     public PublishResultTasklet(AggregationExecutionRepository executions, AggregationWorkStore workStore,
-                                SalesSheetGateway sheets) {
+                                SalesSheetGateway sheets, ExecutionAttemptService attempts) {
         this.executions = executions;
         this.workStore = workStore;
         this.sheets = sheets;
+        this.attempts = attempts;
     }
 
     @Override
@@ -37,9 +40,12 @@ public class PublishResultTasklet implements Tasklet {
         List<RowError> errors = workStore.errors(id);
         if (execution.getValidCount() == 0) {
             sheets.writeErrorsOnly(execution.profileSnapshot(), id, errors);
+            String summary = "有効な売上データがないため集計結果を更新していません";
             execution.complete(ExecutionStatus.NO_VALID_DATA, execution.getSourceCount(), 0,
-                    execution.getInvalidCount(), "有効な売上データがないため集計結果を更新していません");
+                    execution.getInvalidCount(), summary);
             executions.save(execution);
+            attempts.complete(id, ExecutionStatus.NO_VALID_DATA, summary);
+            workStore.clearAggregates(id);
             return RepeatStatus.FINISHED;
         }
 
@@ -53,9 +59,12 @@ public class PublishResultTasklet implements Tasklet {
         sheets.writeResult(execution.profileSnapshot(), result);
         ExecutionStatus status = execution.getInvalidCount() == 0
                 ? ExecutionStatus.SUCCESS : ExecutionStatus.SUCCESS_WITH_WARNINGS;
+        String summary = status == ExecutionStatus.SUCCESS ? "正常に更新しました" : "一部の行を除外して更新しました";
         execution.complete(status, execution.getSourceCount(), execution.getValidCount(),
-                execution.getInvalidCount(), status == ExecutionStatus.SUCCESS ? "正常に更新しました" : "一部の行を除外して更新しました");
+                execution.getInvalidCount(), summary);
         executions.save(execution);
+        attempts.complete(id, status, summary);
+        workStore.clearAggregates(id);
         return RepeatStatus.FINISHED;
     }
 }

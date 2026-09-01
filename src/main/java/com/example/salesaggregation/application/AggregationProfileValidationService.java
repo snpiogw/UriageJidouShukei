@@ -16,6 +16,7 @@ import java.util.regex.Pattern;
 @Component
 public class AggregationProfileValidationService {
     private static final Pattern INVALID_SHEET_CHARACTERS = Pattern.compile("[\\\\/:?*\\[\\]]");
+    private static final Pattern SPREADSHEET_ID = Pattern.compile("[A-Za-z0-9_-]{20,255}");
     private final AggregationProfileRepository profiles;
 
     public AggregationProfileValidationService(AggregationProfileRepository profiles) {
@@ -25,6 +26,9 @@ public class AggregationProfileValidationService {
     public void validate(ProfileCommand command, long excludedId) {
         validateText(command.profileName(), 100, "設定名");
         validateText(command.spreadsheetId(), 255, "Spreadsheet ID");
+        if (!SPREADSHEET_ID.matcher(command.spreadsheetId().trim()).matches()) {
+            throw new IllegalArgumentException("Spreadsheet IDはURLではなく、/d/ と /edit の間のIDを入力してください");
+        }
         validateSheetName(command.sourceSheetName(), "入力シート名");
         validateSheetName(command.resultSheetName(), "集計結果シート名");
         validateSheetName(command.errorSheetName(), "エラーログシート名");

@@ -49,7 +49,7 @@ class ApplicationContextIntegrationTest {
         Integer migrations = jdbc.queryForObject(
                 "select count(*) from flyway_schema_history where success", Integer.class);
 
-        assertThat(migrations).isEqualTo(4);
+        assertThat(migrations).isEqualTo(6);
         assertThat(profileService.get(1).getExecutionTime()).isEqualTo(LocalTime.of(21, 0));
         assertThat(profileService.get(1).getTimeZone()).isEqualTo("Asia/Tokyo");
         assertThat(profileService.get(1).getProfileName()).isEqualTo("既存設定");
@@ -63,6 +63,14 @@ class ApplicationContextIntegrationTest {
                 select count(*) from information_schema.columns
                  where table_schema='public' and table_name='aggregation_execution' and column_name='profile_id'
                 """, Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select count(*) from information_schema.columns
+                 where table_schema='public' and table_name='aggregation_profile' and column_name='active'
+                """, Integer.class)).isEqualTo(1);
+        assertThat(jdbc.queryForObject("""
+                select count(*) from information_schema.tables
+                 where table_schema='public' and table_name='aggregation_execution_attempt'
+                """, Integer.class)).isEqualTo(1);
     }
 
     @Test
@@ -70,13 +78,18 @@ class ApplicationContextIntegrationTest {
     void rendersProfilePagesAndKeepsCsrfProtection() throws Exception {
         mockMvc.perform(get("/admin/profiles"))
                 .andExpect(status().isOk()).andExpect(view().name("admin"))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("既存設定")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("既存設定")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("最終実行")));
         mockMvc.perform(get("/admin/profiles/new"))
                 .andExpect(status().isOk()).andExpect(view().name("profile-form"))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("列マッピング")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("列マッピング")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("この集計設定を有効にする")));
         mockMvc.perform(get("/admin/profiles/1/executions"))
                 .andExpect(status().isOk()).andExpect(view().name("profile-history"))
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("既存設定 の実行履歴")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("既存設定 の実行履歴")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("絞り込む")));
+        mockMvc.perform(get("/admin/profiles/999999/edit"))
+                .andExpect(status().isNotFound());
         mockMvc.perform(post("/admin/executions"))
                 .andExpect(status().isForbidden());
     }

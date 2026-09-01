@@ -1,5 +1,7 @@
 # 汎用売上自動集計システム
 
+[![CI](https://github.com/snpiogw/UriageJidouShukei/actions/workflows/ci.yml/badge.svg)](https://github.com/snpiogw/UriageJidouShukei/actions/workflows/ci.yml)
+
 複数のGoogleスプレッドシートに入力された売上データを、商品・担当者・月ごとに集計するSpring Bootアプリケーションです。小規模事業者や店舗ごとに集計設定（Aggregation Profile）を登録し、異なるシート名、列名、税設定、実行時刻を管理できます。
 
 ## 主な機能
@@ -7,13 +9,15 @@
 - 複数のGoogleスプレッドシートをProfile単位で管理
 - 日付・担当者・商品名・数量・単価のヘッダー名を設定可能
 - 列順変更と関係のない追加列に対応
-- Profileごとの手動実行、実行履歴、次回実行時刻
+- Profileごとの手動実行、状態フィルター・ページング付き実行履歴、次回実行時刻
+- Profileの無効化、最終実行結果、Googleスプレッドシートへの直接リンク
 - ProfileごとのQuartz永続スケジュール
 - Spring Batchによるチャンク処理、チェックポイント、失敗地点からの再開
 - Profile単位のPostgreSQL advisory lock（別Profileは同時実行可能）
 - 不正行の除外、エラーログ出力、最大10,000件の入力
 - 税抜・税込、税率0〜100%、行単位の端数処理
 - Spring Security、BCrypt、CSRF、CSP、HttpOnly/SameSite Cookie
+- Google API接続・読込タイムアウト、実行履歴の保持期限、再開試行ごとの監査履歴
 - Flyway、PostgreSQL、Quartz JDBC JobStore、Docker Compose
 
 ## 構成図
@@ -47,7 +51,7 @@ Web層はJPA Entityを直接操作せず、Application Serviceと読み取り専
 | 列 | 日付、担当者、商品名、数量、単価のヘッダー名 |
 | 集計 | 税区分、税率 |
 | スケジュール | 自動実行ON/OFF、実行時刻、タイムゾーン |
-| 管理 | version、作成日時、更新日時、更新者 |
+| 管理 | 有効/無効、version、作成日時、更新日時、更新者 |
 
 初期Profileの列マッピングは従来と同じです。
 
@@ -93,9 +97,9 @@ sequenceDiagram
     B->>P: 最終状態を保存してロック解除
 ```
 
-Spring Batchのidentifying JobParameterは `executionId` だけです。`profileId` と `requestedAt` はnon-identifyingであり、V3以前に作成されたJobInstanceも同じ `executionId` で再開できます。Batch内部は原則として `executionId` から実行スナップショットを取得します。
+Spring Batchのidentifying JobParameterは `executionId` だけです。`profileId` と `requestedAt` はnon-identifyingであり、V3以前に作成されたJobInstanceも同じ `executionId` で再開できます。Batch内部は原則として `executionId` から実行スナップショットを取得します。V5以降は、再開のたびに試行番号、状態、処理時間、エラーコードを別履歴として保持するため、再開成功後も最初の失敗原因を確認できます。
 
-同じProfileの多重実行は防止しますが、Profile AとProfile BはBatch executorの範囲内で同時実行できます。途中集計テーブルと行エラーは従来どおりexecution ID単位です。
+同じProfileの多重実行は防止しますが、Profile AとProfile BはBatch executorの範囲内で同時実行できます。途中集計テーブルと行エラーはexecution ID単位です。結果公開後は途中集計だけを削除し、入力エラーと実行履歴は保持します。
 
 ## Quartzスケジュール
 
@@ -116,6 +120,8 @@ Flyway V4で、既存データを保持したまま次の変更を行います�
 - Profile別履歴用インデックスと重複制約を追加
 
 V1/V2/V3は変更しません。Spring Batchメタデータ、Quartzメタデータ、途中集計、エラーの既存テーブルも維持します。
+
+Flyway V5ではProfileの有効/無効と、再開試行の監査テーブルを追加します。既存実行には現在の最終状態を試行1として補完します。V6では既存の完了済み実行に残っていた途中集計だけを削除し、保持期限削除用のインデックスを追加します。完了済み実行は既定180日後に関連データごと削除され、保持日数は環境変数で変更できます。
 
 ## V3以前からの移行
 
@@ -155,6 +161,17 @@ docker compose --profile app up --build
 
 HTTPS環境では `SESSION_COOKIE_SECURE=true` にしてください。`ADMIN_PASSWORD_HASH` が空の場合、アプリは安全のため起動しません。
 
+### 運用設定
+
+| 環境変数 | 既定値 | 用途 |
+|---|---:|---|
+| `SHEETS_CONNECT_TIMEOUT_MILLIS` | `5000` | Google APIへの接続待ち上限 |
+| `SHEETS_READ_TIMEOUT_MILLIS` | `30000` | Google API応答待ち上限 |
+| `EXECUTION_HISTORY_DAYS` | `180` | 完了済み実行履歴の保持日数 |
+| `EXECUTION_CLEANUP_CRON` | `0 15 3 * * *` | 履歴削除時刻（Asia/Tokyo） |
+
+バックアップ、復元、監視、障害時の確認順は [運用手順](docs/operations.md)、提出時の説明順は [2分デモ手順](docs/portfolio-demo.md) を参照してください。
+
 ### 既存環境用Spreadsheet ID
 
 ```dotenv
@@ -191,7 +208,7 @@ GOOGLE_SPREADSHEET_ID=
 ./mvnw verify
 ```
 
-単体テストでは、既存の税計算・入力検証・再開処理に加え、列順変更、Profile重複、出力衝突、Legacy補完、JobParameter互換、Profile別Quartz、Profile別ロックを確認します。Dockerが利用できる環境ではTestcontainersによりPostgreSQL 17へV1〜V4を適用し、JPAとQuartz JDBCスキーマも検証します。
+単体テストでは、既存の税計算・入力検証・再開処理に加え、列順変更、Profile重複、出力衝突、Legacy補完、JobParameter互換、Profile別Quartz、Profile別ロック、無効Profileの起動拒否を確認します。Dockerが利用できる環境ではTestcontainersによりPostgreSQL 17へV1〜V6を適用し、既存履歴の試行履歴への移行、JPA、Quartz JDBCスキーマも検証します。
 
 実Google Sheetsを使う確認項目は `docs/acceptance-test.md` にあります。
 
@@ -200,6 +217,7 @@ GOOGLE_SPREADSHEET_ID=
 - ヘッダー行は1行目固定です。
 - 入力上限は既定10,000件、エラー詳細のDB保存は最大500件です。
 - Google Sheetsの登録時ヘッダー検証にはネットワーク、API権限、共有設定が必要です。
+- Google APIは接続5秒・応答30秒でタイムアウトします。長時間処理が必要な環境では環境変数で調整してください。
 - 出力直前の通信断ではGoogle側の反映有無を完全には判定できません。同じ実行結果で再度上書き可能な形式にしています。
 - Profile削除機能は未提供です。履歴と外部キーを保護するため、現バージョンは登録・編集・無効化を対象にしています。
 - 管理者は単一ユーザー構成です。

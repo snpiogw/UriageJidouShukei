@@ -22,11 +22,16 @@ public class AggregationWorkStore {
 
     @Transactional
     public void clear(UUID executionId) {
+        clearAggregates(executionId);
+        jdbc.update("delete from aggregation_row_error where execution_id = ?", executionId);
+        jdbc.update("update aggregation_execution set source_count=0, valid_count=0, invalid_count=0 where id=?", executionId);
+    }
+
+    @Transactional
+    public void clearAggregates(UUID executionId) {
         jdbc.update("delete from aggregation_product_work where execution_id = ?", executionId);
         jdbc.update("delete from aggregation_staff_work where execution_id = ?", executionId);
         jdbc.update("delete from aggregation_monthly_work where execution_id = ?", executionId);
-        jdbc.update("delete from aggregation_row_error where execution_id = ?", executionId);
-        jdbc.update("update aggregation_execution set source_count=0, valid_count=0, invalid_count=0 where id=?", executionId);
     }
 
     @Transactional

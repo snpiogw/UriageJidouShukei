@@ -36,7 +36,7 @@ class LegacyProfileBootstrapServiceTest {
         assertThat(execution.profileSnapshot().spreadsheetId()).isEqualTo("legacy-from-env");
 
         profile.update("既存設定", "changed-in-db", "売上データ", "集計結果", "エラーログ",
-                TaxMode.INCLUSIVE, BigDecimal.TEN, true, LocalTime.of(21, 0), "Asia/Tokyo",
+                TaxMode.INCLUSIVE, BigDecimal.TEN, true, true, LocalTime.of(21, 0), "Asia/Tokyo",
                 ColumnMapping.DEFAULT, "admin");
         service.supplementLegacyProfileAndExecutionsOnce();
 
@@ -67,7 +67,8 @@ class LegacyProfileBootstrapServiceTest {
     }
 
     private AppProperties properties(String spreadsheetId) {
-        return new AppProperties(new AppProperties.Sheets(spreadsheetId, "売上データ", "集計結果", "エラーログ", 10000, 500),
-                new AppProperties.Security("admin", "hash"), new AppProperties.Batch(500, 3));
+        return new AppProperties(new AppProperties.Sheets(spreadsheetId, "売上データ", "集計結果", "エラーログ",
+                10000, 500, 5_000, 30_000), new AppProperties.Security("admin", "hash"),
+                new AppProperties.Batch(500, 3), new AppProperties.Retention(180, "0 15 3 * * *"));
     }
 }
